@@ -8,7 +8,8 @@ export type CharacterId = 'baha' | 'erlan';
 export type ItemId =
   | 'food' | 'medkit' | 'herb' | 'cloth' | 'wood' | 'metal' | 'spirit'
   | 'knife' | 'club' | 'rifle' | 'revolver' | 'ammo'
-  | 'torch' | 'molotov' | 'spike_trap' | 'map';
+  | 'torch' | 'molotov' | 'spike_trap' | 'map'
+  | 'code_scroll' | 'lockpick' | 'fortress_key';
 
 export type Phase = 'morning' | 'day' | 'dusk' | 'night';
 
@@ -80,6 +81,9 @@ export const ITEMS: Record<ItemId, ItemMeta> = {
   molotov:    { name: 'Коктейль',       emoji: '🍾', stackable: true,  kind: 'throw' },
   spike_trap: { name: 'Ловушка',        emoji: '🪤', stackable: true,  kind: 'throw' },
   map:        { name: 'Карта крепости', emoji: '🗺️', stackable: false, kind: 'quest' },
+  code_scroll: { name: 'Код ворот',      emoji: '📜', stackable: false, kind: 'quest' },
+  lockpick:    { name: 'Отмычка',       emoji: '🗝️', stackable: false, kind: 'quest' },
+  fortress_key:{ name: 'Ключ крепости', emoji: '🔑', stackable: false, kind: 'quest' },
 };
 
 export const RECIPES: { id: string; result: ItemId; cost: Partial<Record<ItemId, number>>; label: string }[] = [
@@ -91,9 +95,9 @@ export const RECIPES: { id: string; result: ItemId; cost: Partial<Record<ItemId,
 ];
 
 export const CHARACTERS: Record<CharacterId, { name: string; full: string; perk: string; emoji: string }> = {
-  baha:  { name: 'Баха',  full: 'Бахыт «Баха» Жолдыбай', emoji: '🦊',
+  baha:  { name: 'Баха',  full: 'Бахыт «Баха» Жолдыбай', emoji: '🕷️',
            perk: 'Хитрый и ловкий: лучше стелс и побег, чаще удачный крафт.' },
-  erlan: { name: 'Ерлан', full: 'Ерлан «Медведь» Тасбулат', emoji: '🐻',
+  erlan: { name: 'Ерлан', full: 'Ерлан «Медведь» Тасбулат', emoji: '💀',
            perk: 'Сильный и крепкий: +HP и +урон в ближнем бою.' },
 };
 

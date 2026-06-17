@@ -4,8 +4,8 @@ import { CHARACTERS, ITEMS, type CharacterId, type ItemId } from './engine';
 // ════════════════════════════ 2D SURVIVAL — QASQYR ════════════════════════════
 // Вид сверху, движение в реальном времени (WASD). Canvas на весь экран.
 
-const WORLD_W = 3200;   // ширина мира (px)
-const WORLD_H = 9000;   // высота: старт внизу, крепость наверху (y≈0)
+const WORLD_W = 7200;   // ширина мира (px)
+const WORLD_H = 20000;  // высота: старт внизу, крепость наверху (y≈0)
 const FORTRESS_Y = 160; // дойти сюда = победа
 
 const WALK = 215;       // скорость ходьбы px/с
@@ -18,6 +18,8 @@ interface Ally { x: number; y: number; hp: number; maxHp: number; r: number; cd:
 interface Loot { x: number; y: number; item: ItemId; r: number; }
 interface Bullet { x: number; y: number; vx: number; vy: number; life: number; }
 interface Slot { item: ItemId; count: number; }
+
+interface TunnelChaser { x: number; y: number; speed: number; r: number; hitCd: number; }
 
 interface World {
   char: CharacterId;
@@ -37,14 +39,28 @@ interface World {
   time: number;            // 0..1 сутки
   day: number;
   kills: number;
-  attackTimer: number;     // длительность взмаха
-  attackCd: number;        // кулдаун
+  attackTimer: number;
+  attackCd: number;
   wantsAttack: boolean;
   spawnTimer: number;
   hurtFlash: number;
   result: '' | 'win' | 'lose';
   banner: string;
   bannerT: number;
+  // ── Загадки и ложные крепости ──
+  nearRiddle: number;      // -1 = нет, 0/1 = индекс загадки рядом
+  riddleSolved: boolean[]; // [false, false] изначально
+  fakeFortressMock: number;// кулдаун насмешки
+  fortressKeyLoot: { x: number; y: number } | null; // позиция ключа на карте
+  // ── Системы ивентов ──
+  playTime: number;        // секунды с начала игры
+  eventId: number;         // 0=нет, 1=хардкор, 2=туннель, 3=буря, 4=нашествие, 5=берсерк
+  eventTimer: number;      // осталось секунд текущего ивента
+  nextEventIn: number;     // секунд до следующего ивента
+  eventCount: number;      // сколько ивентов запущено всего
+  frozenTimer: number;     // секунды заморозки игрока
+  berserkMult: number;     // множитель скорости врагов (берсерк)
+  tunnelChaser: TunnelChaser | null;
 }
 
 const ENEMY_DEFS: Record<EnemyKind, { hp: number; r: number; speed: number; dmg: number; color: string; emoji: string; name: string }> = {
@@ -55,7 +71,7 @@ const ENEMY_DEFS: Record<EnemyKind, { hp: number; r: number; speed: number; dmg:
   wolf:    { hp: 45,  r: 15, speed: 205, dmg: 20, color: '#777',    emoji: '🐺',   name: 'Волк' },
 };
 
-const LOOT_TABLE: ItemId[] = ['food', 'medkit', 'herb', 'cloth', 'metal', 'spirit', 'ammo', 'ammo', 'revolver', 'club'];
+const LOOT_TABLE: ItemId[] = ['food', 'medkit', 'herb', 'cloth', 'metal', 'spirit', 'ammo', 'ammo', 'ammo', 'revolver', 'revolver', 'rifle', 'rifle', 'club'];
 
 // Подмога — союзники, что приходят на помощь
 const ALLY_POOL: { name: string; emoji: string; hp: number }[] = [
@@ -67,6 +83,43 @@ const ALLY_POOL: { name: string; emoji: string; hp: number }[] = [
 ];
 
 function hash(n: number): number { const x = Math.sin(n * 127.1) * 43758.5453; return x - Math.floor(x); }
+
+// ── Ложные крепости и загадки ──
+const FAKE_FORTRESS_DEFS = [
+  { x: WORLD_W * 0.18, y: 7100, mockIdx: 0 },
+  { x: WORLD_W * 0.82, y: 5200, mockIdx: 1 },
+  { x: WORLD_W * 0.5,  y: 2800, mockIdx: 2 },
+] as const;
+
+const RIDDLE_DEFS = [
+  { x: WORLD_W * 0.3,  y: 6000, item: 'code_scroll' as ItemId },
+  { x: WORLD_W * 0.7,  y: 3800, item: 'lockpick'    as ItemId },
+] as const;
+
+const MOCK_MSGS = [
+  '😂 ХА-ХА! Думал это крепость? Ты клоун, Баха!',
+  '🤡 Ловушка! Это просто руины. Ищи настоящую!',
+  '💀 Серьёзно?! Ты дошёл сюда ради картонной стены?',
+];
+
+const RIDDLES = [
+  {
+    question: 'Я иду, но ног нет. Я живу — пока ем, умираю — когда пью. Что я?',
+    options: ['🔥 Огонь', '💨 Ветер', '💧 Вода', '⌛ Время'],
+    correct: 0,
+    reward: 'code_scroll' as ItemId,
+    rewardText: '📜 Получен КОД К ВОРОТАМ! Почти у цели...',
+    wrongText: '❌ Неверно! Дух загадки ударяет тебя — −20 HP',
+  },
+  {
+    question: 'Чем больше берёшь — тем больше становится. Нельзя купить, можно потерять. Что это?',
+    options: ['🕳️ Яма', '💰 Деньги', '📋 Долг', '🌑 Тень'],
+    correct: 0,
+    reward: 'lockpick' as ItemId,
+    rewardText: '🗝️ Получена ОТМЫЧКА! Теперь ты готов.',
+    wrongText: '❌ Неверно! Проклятие загадки — −20 HP',
+  },
+] as const;
 
 // ── Инвентарь ──
 function addItem(w: World, item: ItemId, count = 1): boolean {
@@ -102,6 +155,9 @@ function makeWorld(char: CharacterId): World {
     time: 0.15, day: 1, kills: 0,
     attackTimer: 0, attackCd: 0, wantsAttack: false, spawnTimer: 0,
     hurtFlash: 0, result: '', banner: '', bannerT: 0,
+    nearRiddle: -1, riddleSolved: [false, false], fakeFortressMock: 0, fortressKeyLoot: null,
+    playTime: 0, eventId: 0, eventTimer: 0, nextEventIn: 60, eventCount: 0,
+    frozenTimer: 0, berserkMult: 1, tunnelChaser: null,
   };
   addItem(w, 'knife'); addItem(w, 'food', 2); addItem(w, 'cloth', 2);
   w.equipped = 0;
@@ -115,16 +171,67 @@ function makeWorld(char: CharacterId): World {
 
 function banner(w: World, text: string) { w.banner = text; w.bannerT = 3.2; }
 
+// ════════════════════════════ JUMPSCARE SOUND ════════════════════════════
+function playJumpscareSfx() {
+  try {
+    const ac = new AudioContext();
+    const dur = 2.6;
+    const sr = ac.sampleRate;
+    // White noise burst
+    const buf = ac.createBuffer(1, Math.floor(sr * dur), sr);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const noise = ac.createBufferSource();
+    noise.buffer = buf;
+    // Piercing band-pass filter
+    const flt = ac.createBiquadFilter();
+    flt.type = 'bandpass'; flt.frequency.value = 2800; flt.Q.value = 0.28;
+    // Screech oscillator on top
+    const osc = ac.createOscillator();
+    osc.type = 'sawtooth'; osc.frequency.value = 880;
+    osc.frequency.exponentialRampToValueAtTime(220, ac.currentTime + dur);
+    // Gain envelope — instant loud attack, decay
+    const gain = ac.createGain();
+    gain.gain.setValueAtTime(1.6, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    const gainOsc = ac.createGain();
+    gainOsc.gain.setValueAtTime(0.6, ac.currentTime);
+    gainOsc.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur * 0.7);
+    noise.connect(flt); flt.connect(gain); gain.connect(ac.destination);
+    osc.connect(gainOsc); gainOsc.connect(ac.destination);
+    noise.start(); osc.start();
+    setTimeout(() => ac.close().catch(() => {}), (dur + 1) * 1000);
+  } catch { /* AudioContext unavailable */ }
+}
+
 // ════════════════════════════ КОМПОНЕНТ ════════════════════════════
 export function QasqyrGame({ onExit }: { onExit?: () => void }) {
   const [screen, setScreen] = useState<'intro' | 'playing' | 'over'>('intro');
   const [chosen, setChosen] = useState<CharacterId>('baha');
   const [result, setResult] = useState<{ kind: 'win' | 'lose'; title: string; text: string } | null>(null);
+  const [jumpscare, setJumpscare] = useState(false);
+  const [riddle, setRiddle] = useState<number | null>(null); // 0 или 1 — индекс загадки
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<World | null>(null);
   const keysRef = useRef<Set<string>>(new Set());
   const mouseRef = useRef<{ x: number; y: number; down: boolean }>({ x: 0, y: 0, down: false });
+
+  function handleRiddleAnswer(riddleIdx: number, answerIdx: number) {
+    const w = worldRef.current;
+    if (!w) return;
+    const r = RIDDLES[riddleIdx];
+    if (answerIdx === r.correct) {
+      addItem(w, r.reward);
+      w.riddleSolved[riddleIdx] = true;
+      banner(w, r.rewardText);
+    } else {
+      w.hp = Math.max(1, w.hp - 20);
+      w.hurtFlash = 0.4;
+      banner(w, r.wrongText);
+    }
+    setRiddle(null);
+  }
 
   function startGame(c: CharacterId) {
     setChosen(c);
@@ -165,6 +272,10 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
           : { kind, title: '💔 Концовка «Цена»', text: 'Вы дошли, но еле живыми. Крови хватило на лекарство — мир спасён дорогой ценой.' });
       } else {
         setResult({ kind, title: '🐺 Концовка «Волки»', text: 'Степь забрала вас раньше, чем вы дошли. Где-то воет стая. Karasan победил.' });
+        playJumpscareSfx();
+        setJumpscare(true);
+        setTimeout(() => { setJumpscare(false); if (!stopped) setScreen('over'); }, 2800);
+        return;
       }
       setTimeout(() => { if (!stopped) setScreen('over'); }, 700);
     };
@@ -194,6 +305,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       else if (k === 'f') { if (countItem(w, 'medkit') && w.hp < w.maxHp) { removeOne(w, 'medkit'); w.hp = Math.min(w.maxHp, w.hp + 45); banner(w, '💊 +45 HP'); } }
       else if (k === 'c') { if (countItem(w, 'torch')) { w.torch = !w.torch; banner(w, w.torch ? '🔥 Факел зажжён' : 'Факел потушен'); } else banner(w, 'Нет факела (скрафти в развалинах)'); }
       else if (k === 'r') { banner(w, countItem(w, 'ammo') ? `🔁 Патронов: ${countItem(w, 'ammo')}` : 'Нет патронов'); }
+      else if (k === 'e') { if (w.nearRiddle >= 0) setRiddle(w.nearRiddle); }
       else if (k >= '1' && k <= '9') { const i = Number(k) - 1; const sl = w.inv[i]; if (sl) { const m = ITEMS[sl.item]; if (m.kind === 'melee' || m.kind === 'ranged') { w.equipped = i; banner(w, `🗡️ ${m.name}`); } else if (m.kind === 'heal') { removeOne(w, sl.item); w.hp = Math.min(w.maxHp, w.hp + 45); banner(w, '💊 +45 HP'); } else if (m.kind === 'food') { removeOne(w, sl.item); w.hp = Math.min(w.maxHp, w.hp + 15); banner(w, '🍖 +15 HP'); } } }
     };
     const up = (e: KeyboardEvent) => { keysRef.current.delete(e.key.toLowerCase()); };
@@ -205,39 +317,159 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('mousemove', mm); window.removeEventListener('mousedown', mdn); window.removeEventListener('mouseup', mup); };
   }, [screen, onExit]);
 
-  // ════════ ЭКРАН СЮЖЕТА ════════
+  // ════════ ЭКРАН ЗАСТАВКИ (постер) ════════
   if (screen === 'intro') {
     return (
-      <div id="qasqyr-root" style={overlay} >
-        <div style={introCard}>
-          <h1 style={{ fontSize: 44, letterSpacing: 2, margin: 0 }}>QASQYR</h1>
-          <p style={{ color: '#d97757', margin: '2px 0 18px', fontWeight: 600 }}>Қасқыр · «Волк» — survival в степи</p>
+      <div id="qasqyr-root" style={{
+        position: 'fixed', inset: 0, zIndex: 9999,
+        overflow: 'hidden', color: '#e8e6e1',
+        background: '#050807',
+        display: 'flex', flexDirection: 'column'
+      }}>
+        {/* ── Постер ── */}
+        <div style={{
+          flex: '1 1 0', minHeight: 0, position: 'relative',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: 'linear-gradient(180deg, #040706 0%, #08120d 35%, #0d1b11 65%, #040706 100%)'
+          }} />
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 1,
+            background: 'radial-gradient(ellipse 90% 80% at 50% 40%, transparent 25%, rgba(0,0,0,0.72) 100%)'
+          }} />
+          <div style={{
+            position: 'absolute', bottom: 0, left: 0, right: 0, height: '38%', zIndex: 2,
+            background: 'linear-gradient(to top, rgba(4,6,5,0.92) 0%, transparent 100%)'
+          }} />
 
-          <div style={story}>
-            <p><b>1873 год. Великая Степь.</b></p>
-            <p>Караван кочевников шёл к зимовке, когда из гор пришли <i>бешеные волки</i> — с мутными глазами и чёрной пеной у пасти. Их укус нёс <b>«Карасан»</b> — чёрную заразу. Укушенный не умирал. Он менялся: чернели белки глаз, исчезал разум, и он бросался на живых.</p>
-            <p>За одну зиму зараза выкосила аулы и города. К весне Степь стала кладбищем под открытым небом. А по ночам приходят <i>они</i>.</p>
-            <p>Но вы двое в ту ночь так упились кумысом, что проспали резню в стогу сена — и наутро оказались единственными живыми. И единственными, кого вирус <b>не берёт</b>.</p>
-            <p>Старый табиб перед смертью прошептал: <b>«Ваша кровь — лекарство. Идите на север, в крепость-лабораторию. Сто вёрст.»</b></p>
-            <p style={{ color: '#d97757' }}>Дойдите. Через всю заражённую Степь.</p>
+          <svg
+            viewBox="0 0 500 700"
+            style={{
+              position: 'relative', zIndex: 3,
+              height: '100%', maxHeight: '100%',
+              width: 'auto', display: 'block',
+              filter: 'drop-shadow(0 12px 60px rgba(0,0,0,0.98))'
+            }}
+            preserveAspectRatio="xMidYMid meet"
+          >
+            {/* Степная растительность */}
+            <g fill="#070e09" opacity="0.85">
+              <path d="M25 700 Q18 570 10 460 Q13 456 16 460 Q24 570 30 700Z" />
+              <path d="M48 700 Q55 595 66 488 Q69 485 72 488 Q65 595 68 700Z" />
+              <path d="M10 700 Q4 630 -2 520 Q0 517 3 520 Q10 630 14 700Z" />
+              <path d="M462 700 Q470 570 478 460 Q481 456 484 460 Q478 570 482 700Z" />
+              <path d="M445 700 Q438 595 426 488 Q423 485 420 488 Q427 595 430 700Z" />
+              <path d="M478 700 Q484 630 492 520 Q494 517 497 520 Q492 630 487 700Z" />
+            </g>
+            <g stroke="#09120b" strokeWidth="4" fill="none" opacity="0.55">
+              <path d="M78 0 Q85 90 81 180 Q77 240 85 310" />
+              <path d="M83 130 Q65 162 49 152" />
+              <path d="M82 185 Q99 210 114 200" />
+              <path d="M416 0 Q409 95 413 195 Q417 255 409 320" />
+              <path d="M411 148 Q429 172 445 162" />
+              <path d="M410 210 Q393 233 377 223" />
+            </g>
+
+            {/* ЕРЛАН — высокий крепкий, чуть сзади справа */}
+            <g fill="#0c0e0c">
+              <ellipse cx="292" cy="118" rx="33" ry="37" />
+              <path d="M271 152 Q272 174 292 174 Q312 174 313 152Z" />
+              <path d="M238 178
+                Q228 252 224 355 Q220 458 224 588
+                L269 588 Q273 518 280 458 Q286 408 292 384
+                Q298 408 304 458 Q311 518 315 588
+                L360 588 Q364 458 360 355 Q356 252 346 178
+                Q319 168 292 165 Q265 168 238 178Z" />
+              <path d="M238 190 L190 358 L177 354 L174 374 L206 382 L221 364 L251 205Z" />
+              <path d="M346 190 L384 328 L372 332 L342 205Z" />
+              <path d="M236 584 L224 700 L251 700 L267 640 L280 700 L304 700 L317 640 L332 700 L359 700 L347 584Z" />
+              <rect x="160" y="362" width="94" height="11" rx="4" transform="rotate(4 208 367)" />
+            </g>
+
+            {/* БАХА — пониже стройнее, чуть впереди слева */}
+            <g fill="#101310">
+              <ellipse cx="175" cy="200" rx="25" ry="28" transform="rotate(-3 175 200)" />
+              <path d="M151 224 Q153 241 175 243 Q197 241 199 224 Q187 231 175 231 Q163 231 151 224Z" />
+              <path d="M163 228 Q163 247 175 247 Q187 247 187 228Z" />
+              <path d="M141 250
+                Q134 318 132 408 Q130 499 134 604
+                L163 604 Q166 544 171 490 Q175 452 179 432
+                Q183 452 187 490 Q192 544 196 604
+                L225 604 Q229 499 227 408 Q225 318 218 250
+                Q199 242 179 239 Q159 242 141 250Z" />
+              <path d="M141 262 L108 390 L119 394 L151 276Z" />
+              <path d="M218 262 L247 370 L257 365 L228 276Z" />
+              <path d="M143 600 L134 700 L158 700 L172 644 L186 700 L210 700 L222 600Z" />
+            </g>
+
+            {/* Название — двустрочное, постерный стиль */}
+            <text x="250" y="608" textAnchor="middle" fill="#f0ece4"
+              fontSize="88" fontWeight="900"
+              fontFamily="Georgia, 'Times New Roman', serif" letterSpacing="10">
+              ҚАС
+            </text>
+            <text x="250" y="690" textAnchor="middle" fill="#f0ece4"
+              fontSize="88" fontWeight="900"
+              fontFamily="Georgia, 'Times New Roman', serif" letterSpacing="10">
+              ҚЫР
+            </text>
+          </svg>
+
+          {/* Подзаголовок поверх постера */}
+          <div style={{
+            position: 'absolute', bottom: 14, left: 0, right: 0, zIndex: 4,
+            textAlign: 'center',
+            fontSize: 'clamp(10px, 1.6vw, 14px)',
+            letterSpacing: '0.38em',
+            color: '#5a8a60',
+            fontFamily: 'Georgia, serif',
+            textTransform: 'uppercase',
+            opacity: 0.9
+          }}>
+            Казахский постапокалипсис · 1873
           </div>
+        </div>
 
-          <p style={{ fontWeight: 700, margin: '8px 0 10px' }}>Выбери героя:</p>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+        {/* ── Выбор персонажа + кнопка ── */}
+        <div style={{
+          background: '#050807',
+          borderTop: '1px solid #182018',
+          padding: '12px 16px 20px',
+          textAlign: 'center', flexShrink: 0
+        }}>
+          <p style={{ margin: '0 0 8px', fontSize: 11, letterSpacing: '0.22em', textTransform: 'uppercase', opacity: 0.5, fontFamily: 'system-ui', fontWeight: 700 }}>— Выбери героя —</p>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, justifyContent: 'center' }}>
             {(Object.keys(CHARACTERS) as CharacterId[]).map((id) => {
               const c = CHARACTERS[id]; const sel = chosen === id;
               return (
-                <button key={id} onClick={() => setChosen(id)} style={{ ...charCard, borderColor: sel ? '#d97757' : '#33363f', background: sel ? '#d9775722' : '#1b1d24' }}>
-                  <div style={{ fontSize: 34 }}>{c.emoji}</div>
-                  <div style={{ fontWeight: 800 }}>{c.name}</div>
-                  <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.3 }}>{c.perk}</div>
+                <button key={id} onClick={() => setChosen(id)} style={{
+                  flex: '0 1 190px',
+                  border: `2px solid ${sel ? '#5a8a5a' : '#182018'}`,
+                  borderRadius: 8, padding: '10px 12px', cursor: 'pointer',
+                  color: '#e8e6e1', display: 'flex', flexDirection: 'column',
+                  gap: 2, alignItems: 'center', textAlign: 'center',
+                  background: sel ? 'rgba(90,138,90,0.14)' : 'rgba(4,6,5,0.85)',
+                  fontFamily: 'system-ui'
+                }}>
+                  <div style={{ fontSize: 26 }}>{c.emoji}</div>
+                  <div style={{ fontWeight: 800, fontSize: 14 }}>{c.name}</div>
+                  <div style={{ fontSize: 11, opacity: 0.65, lineHeight: 1.3 }}>{c.perk}</div>
                 </button>
               );
             })}
           </div>
-
-          <button onClick={() => startGame(chosen)} style={playBtn}>▶  ИГРАТЬ</button>
-          <p style={{ fontSize: 12, opacity: 0.55, marginTop: 14 }}>
+          <button onClick={() => startGame(chosen)} style={{
+            background: 'transparent', color: '#f0ece4',
+            border: '2px solid #4e7c50', borderRadius: 3,
+            padding: '12px 44px', fontSize: 14, fontWeight: 800,
+            letterSpacing: '0.35em', cursor: 'pointer',
+            textTransform: 'uppercase', fontFamily: 'system-ui',
+            marginBottom: 6
+          }}>▶  ИГРАТЬ</button>
+          <p style={{ fontSize: 10, opacity: 0.3, marginTop: 6, fontFamily: 'system-ui', lineHeight: 1.4 }}>
             WASD — движение · мышь — прицел · ЛКМ / Space — атака · Shift — красться · F — лечиться · C — факел · 1–9 — инвентарь · Esc — выход
           </p>
         </div>
@@ -252,6 +484,128 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       <canvas ref={canvasRef} style={{ display: 'block' }} />
       <button onClick={() => { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); onExit?.(); }}
         style={exitBtn}>✕ Выход (Esc)</button>
+
+      {jumpscare && (
+        <>
+          <style>{`
+            @keyframes js-bg {
+              0%   { background:#aa2200; }
+              6%   { background:#ff3300; }
+              18%  { background:#880000; }
+              45%  { background:#330000; }
+              100% { background:#000000; }
+            }
+            @keyframes js-slam {
+              0%   { transform:scale(1.9); }
+              8%   { transform:scale(0.96); }
+              15%  { transform:scale(1.04); }
+              22%  { transform:scale(1); }
+              100% { transform:scale(1); }
+            }
+            @keyframes js-shake {
+              0%   { transform:translate(0,0); }
+              10%  { transform:translate(-20px,12px); }
+              20%  { transform:translate(16px,-14px); }
+              30%  { transform:translate(-12px,18px); }
+              40%  { transform:translate(14px,-8px); }
+              55%  { transform:translate(-6px,8px); }
+              70%  { transform:translate(5px,-5px); }
+              100% { transform:translate(0,0); }
+            }
+            @keyframes js-fade {
+              0%   { opacity:1; }
+              65%  { opacity:1; }
+              100% { opacity:0; }
+            }
+            .js-overlay { animation: js-bg 2.8s ease-out forwards; }
+            .js-slam    { animation: js-slam 0.2s ease-out forwards, js-shake 0.42s ease-in-out, js-fade 2.8s ease-in-out forwards; }
+          `}</style>
+          <div className="js-overlay" style={{
+            position:'absolute', inset:0, zIndex:9998, overflow:'hidden',
+            display:'flex', alignItems:'center', justifyContent:'center'
+          }}>
+            <div className="js-slam" style={{ width:'100%', height:'100%' }}>
+              <svg viewBox="0 0 400 400" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
+                <defs>
+                  <radialGradient id="fur" cx="50%" cy="42%">
+                    <stop offset="0%"   stopColor="#d98c2c"/>
+                    <stop offset="40%"  stopColor="#bf7218"/>
+                    <stop offset="78%"  stopColor="#8a5010"/>
+                    <stop offset="100%" stopColor="#3e1e06"/>
+                  </radialGradient>
+                  <radialGradient id="vign" cx="50%" cy="50%">
+                    <stop offset="45%"  stopColor="#000000" stopOpacity="0"/>
+                    <stop offset="100%" stopColor="#000000" stopOpacity="0.82"/>
+                  </radialGradient>
+                  <radialGradient id="glow" cx="50%" cy="44%">
+                    <stop offset="0%"   stopColor="#b06010" stopOpacity="0.35"/>
+                    <stop offset="100%" stopColor="#000000" stopOpacity="0"/>
+                  </radialGradient>
+                </defs>
+
+                {/* Фон */}
+                <rect width="400" height="400" fill="#050302"/>
+                <rect width="400" height="400" fill="url(#glow)"/>
+
+                {/* Голова — большой овал, выходит за края */}
+                <ellipse cx="200" cy="190" rx="235" ry="250" fill="url(#fur)"/>
+
+                {/* Верхняя тень (лоб) */}
+                <ellipse cx="200" cy="28"  rx="250" ry="140" fill="#030201" opacity="0.7"/>
+
+                {/* Морда — светлее */}
+                <ellipse cx="200" cy="308" rx="115" ry="95"  fill="#c88c38"/>
+
+                {/* Тень под мордой */}
+                <ellipse cx="200" cy="420" rx="270" ry="170" fill="#030201" opacity="0.85"/>
+
+                {/* Глазницы */}
+                <ellipse cx="126" cy="192" rx="62" ry="64"   fill="#040202"/>
+                <ellipse cx="274" cy="192" rx="62" ry="64"   fill="#040202"/>
+
+                {/* Ободок глаз */}
+                <ellipse cx="126" cy="192" rx="66" ry="68"   fill="none" stroke="#5c380e" strokeWidth="4" opacity="0.5"/>
+                <ellipse cx="274" cy="192" rx="66" ry="68"   fill="none" stroke="#5c380e" strokeWidth="4" opacity="0.5"/>
+
+                {/* Блик — белое пятно сверху-слева (как на фото) */}
+                <ellipse cx="108" cy="171" rx="14" ry="16"   fill="#e8e4dc" opacity="0.88"/>
+                <ellipse cx="256" cy="171" rx="14" ry="16"   fill="#e8e4dc" opacity="0.88"/>
+
+                {/* Переносица */}
+                <ellipse cx="200" cy="262" rx="28" ry="18"   fill="#7a4810" opacity="0.55"/>
+
+                {/* Ноздри */}
+                <ellipse cx="188" cy="302" rx="10" ry="7"    fill="#3a1c06" opacity="0.8"/>
+                <ellipse cx="212" cy="302" rx="10" ry="7"    fill="#3a1c06" opacity="0.8"/>
+
+                {/* Виньетка по краям */}
+                <rect width="400" height="400" fill="url(#vign)"/>
+              </svg>
+            </div>
+          </div>
+        </>
+      )}
+
+      {riddle !== null && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 9990, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.82)' }}>
+          <div style={{ background: '#0e1008', border: '2px solid #6b9a40', borderRadius: 16, padding: '28px 32px', width: 'min(500px,92vw)', textAlign: 'center', color: '#e8e6e1', fontFamily: 'system-ui' }}>
+            <div style={{ fontSize: 36, marginBottom: 8 }}>{riddle === 0 ? '📜' : '🗝️'}</div>
+            <h2 style={{ margin: '0 0 6px', color: '#d9c060', fontSize: 18 }}>Загадка {riddle + 1} из 2</h2>
+            <p style={{ color: '#b0c090', fontSize: 13, margin: '0 0 4px' }}>Реши загадку, получи {riddle === 0 ? 'КОД К ВОРОТАМ' : 'ОТМЫЧКУ'}. Неверный ответ — −20 HP.</p>
+            <p style={{ fontSize: 16, lineHeight: 1.6, margin: '16px 0 20px', color: '#f0ece0' }}>{RIDDLES[riddle].question}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {(RIDDLES[riddle].options as readonly string[]).map((opt, i) => (
+                <button key={i} onClick={() => handleRiddleAnswer(riddle, i)} style={{ background: '#1a2010', border: '1px solid #4a6a28', borderRadius: 8, padding: '11px 16px', color: '#d0e0a0', fontSize: 15, cursor: 'pointer', textAlign: 'left' }}>
+                  {opt}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setRiddle(null)} style={{ marginTop: 14, background: 'transparent', border: '1px solid #444', borderRadius: 8, padding: '8px 24px', color: '#666', fontSize: 13, cursor: 'pointer' }}>
+              Закрыть
+            </button>
+          </div>
+        </div>
+      )}
 
       {screen === 'over' && result && (
         <div style={overPanel}>
@@ -271,16 +625,81 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
 // ════════════════════════════ ОБНОВЛЕНИЕ МИРА ════════════════════════════
 function update(w: World, dt: number, keys: Set<string>, mouse: { x: number; y: number; down: boolean }, finish: (k: 'win' | 'lose') => void) {
   // время суток
-  w.time += dt / 90; // сутки = 90с
+  w.time += dt / 90;
   if (w.time >= 1) { w.time -= 1; w.day += 1; banner(w, `📅 День ${w.day}`); }
   const night = w.time < 0.22 || w.time > 0.74;
 
-  // движение
+  // ── playTime и заморозка ──
+  w.playTime += dt;
+  w.frozenTimer = Math.max(0, w.frozenTimer - dt);
+
+  // ── Система ивентов ──
+  if (w.eventId > 0) {
+    w.eventTimer -= dt;
+    // обратный отсчёт в баннере
+    if (w.eventTimer > 0 && w.eventTimer <= 10) {
+      const sec = Math.ceil(w.eventTimer);
+      if (sec !== Math.ceil(w.eventTimer + dt)) banner(w, `⏱️ ${sec}с...`);
+    }
+    if (w.eventTimer <= 0) {
+      const ended = w.eventId;
+      if (ended === 1) {
+        // хардкор → сразу туннель
+        w.tunnelChaser = { x: w.px, y: w.py - 720, speed: WALK, r: 24, hitCd: 0 };
+        w.eventId = 2; w.eventTimer = 30;
+        banner(w, '🚇 ТУННЕЛЬ! Беги от монстра!');
+      } else {
+        if (ended === 5) w.berserkMult = 1;
+        w.tunnelChaser = null;
+        w.eventId = 0; w.nextEventIn = 90;
+        const msgs: Record<number, string> = { 2: '✅ Вырвался из туннеля!', 3: '✅ Буря стихла!', 4: '✅ Нашествие отбито!', 5: '✅ Враги успокоились.' };
+        banner(w, msgs[ended] ?? '✅ Испытание пройдено!');
+      }
+    }
+  }
+  if (w.eventId === 0) {
+    w.nextEventIn -= dt;
+    if (w.nextEventIn <= 0) {
+      w.eventCount += 1;
+      const evOrder = [1, 3, 4, 5, 3, 4, 5, 4, 5];
+      const ev = evOrder[Math.min(w.eventCount - 1, evOrder.length - 1)];
+      w.eventId = ev;
+      if (ev === 1) {
+        w.eventTimer = 30;
+        // изъять всё кроме еды и ножа
+        for (let i = 0; i < 9; i++) {
+          const sl = w.inv[i];
+          if (sl && sl.item !== 'food' && sl.item !== 'knife') { w.inv[i] = null; if (w.equipped === i) w.equipped = null; }
+        }
+        banner(w, '⚠️ ХАРДКОР! Снаряжение изъято — выживи 30 секунд!');
+      } else if (ev === 3) {
+        w.eventTimer = 25;
+        banner(w, '🌪️ СТЕПНАЯ БУРЯ! Скорость снижена на 60%!');
+      } else if (ev === 4) {
+        w.eventTimer = 25;
+        const d = ENEMY_DEFS['alyp'];
+        for (let i = 0; i < 15; i++) {
+          const ang = (i / 15) * Math.PI * 2;
+          w.enemies.push({ x: w.px + Math.cos(ang) * 660, y: w.py + Math.sin(ang) * 660, hp: d.hp, maxHp: d.hp, r: d.r, kind: 'alyp', speed: d.speed, dmg: d.dmg, hitFlash: 0 });
+        }
+        banner(w, '👹 НАШЕСТВИЕ! Орда Алыпов атакует!');
+      } else if (ev === 5) {
+        w.eventTimer = 30;
+        w.berserkMult = 2.2;
+        banner(w, '🔴 БЕРСЕРК! Враги вдвое быстрее!');
+      }
+    }
+  }
+
+  // движение (учитываем заморозку и бурю)
   w.sneaking = keys.has('shift');
-  const sp = w.sneaking ? SNEAK : WALK;
+  const stormMult = w.eventId === 3 ? 0.4 : 1;
+  const sp = w.frozenTimer > 0 ? 0 : (w.sneaking ? SNEAK : WALK) * stormMult;
   let dx = 0, dy = 0;
-  if (keys.has('w')) dy -= 1; if (keys.has('s')) dy += 1;
-  if (keys.has('a')) dx -= 1; if (keys.has('d')) dx += 1;
+  if (w.frozenTimer <= 0) {
+    if (keys.has('w')) dy -= 1; if (keys.has('s')) dy += 1;
+    if (keys.has('a')) dx -= 1; if (keys.has('d')) dx += 1;
+  }
   const len = Math.hypot(dx, dy) || 1;
   w.px += (dx / len) * sp * dt;
   w.py += (dy / len) * sp * dt;
@@ -291,8 +710,47 @@ function update(w: World, dt: number, keys: Set<string>, mouse: { x: number; y: 
   // прицел к мыши
   w.aim = Math.atan2(mouse.y - window.innerHeight / 2, mouse.x - window.innerWidth / 2);
 
-  // победа
-  if (w.py <= FORTRESS_Y) { finish('win'); return; }
+  // победа — нужны код, отмычка и ключ
+  if (w.py <= FORTRESS_Y) {
+    const hasCode = countItem(w, 'code_scroll') > 0;
+    const hasLock = countItem(w, 'lockpick') > 0;
+    const hasKey  = countItem(w, 'fortress_key') > 0;
+    if (hasCode && hasLock && hasKey) { finish('win'); return; }
+    w.py = FORTRESS_Y + 95;
+    if (!w.fortressKeyLoot && !hasKey) {
+      const kx = 400 + Math.random() * (WORLD_W - 800);
+      const ky = 2500 + Math.random() * (WORLD_H - 5000);
+      w.fortressKeyLoot = { x: kx, y: ky };
+      w.loot.push({ x: kx, y: ky, item: 'fortress_key', r: 14 });
+      banner(w, '🔑 Ворота не открыть... КЛЮЧ вылетел в степь! Стрелка укажет путь.');
+    } else {
+      const missing: string[] = [];
+      if (!hasCode) missing.push('КОД 📜');
+      if (!hasLock)  missing.push('ОТМЫЧКУ 🗝️');
+      if (!hasKey)   missing.push('КЛЮЧ 🔑');
+      if (missing.length) banner(w, `🔒 Нужны: ${missing.join(', ')}`);
+    }
+  }
+
+  // ложные крепости
+  if (w.fakeFortressMock > 0) w.fakeFortressMock -= dt;
+  for (const ff of FAKE_FORTRESS_DEFS) {
+    if (Math.hypot(w.px - ff.x, w.py - ff.y) < 200 && w.fakeFortressMock <= 0) {
+      w.fakeFortressMock = 8;
+      banner(w, MOCK_MSGS[ff.mockIdx]);
+      break;
+    }
+  }
+
+  // загадки — подсказка при приближении
+  w.nearRiddle = -1;
+  for (let i = 0; i < RIDDLE_DEFS.length; i++) {
+    if (!w.riddleSolved[i] && Math.hypot(w.px - RIDDLE_DEFS[i].x, w.py - RIDDLE_DEFS[i].y) < 88) {
+      w.nearRiddle = i;
+      if (w.bannerT <= 0.6) banner(w, `🔍 [E] — прочитать загадку (${i === 0 ? 'даёт КОД 📜' : 'даёт ОТМЫЧКУ 🗝️'})`);
+      break;
+    }
+  }
 
   // атака
   w.attackCd = Math.max(0, w.attackCd - dt);
@@ -330,11 +788,12 @@ function update(w: World, dt: number, keys: Set<string>, mouse: { x: number; y: 
   }
   w.bullets = w.bullets.filter((b) => b.life > 0);
 
-  // спавн врагов — постоянный поток на героя
+  // спавн врагов
   w.spawnTimer -= dt;
-  const cap = night ? 32 : 20;
+  const cap = w.eventId === 1 ? 50 : (night ? 32 : 20);
+  const spawnRate = w.eventId === 1 ? 0.28 : (night ? 0.6 : 1.0);
   if (w.spawnTimer <= 0 && w.enemies.length < cap) {
-    w.spawnTimer = night ? 0.6 : 1.0;
+    w.spawnTimer = spawnRate;
     const ang = Math.random() * Math.PI * 2;
     const dist = 560 + Math.random() * 160;
     const ex = w.px + Math.cos(ang) * dist;
@@ -362,8 +821,8 @@ function update(w: World, dt: number, keys: Set<string>, mouse: { x: number; y: 
       if (d < best && d < 240) { best = d; tx = al.x; ty = al.y; }
     }
     const a = Math.atan2(ty - e.y, tx - e.x);
-    e.x += Math.cos(a) * e.speed * dt;
-    e.y += Math.sin(a) * e.speed * dt;
+    e.x += Math.cos(a) * e.speed * w.berserkMult * dt;
+    e.y += Math.sin(a) * e.speed * w.berserkMult * dt;
 
     // урон герою при касании
     const dp = Math.hypot(w.px - e.x, w.py - e.y);
@@ -406,6 +865,22 @@ function update(w: World, dt: number, keys: Set<string>, mouse: { x: number; y: 
   }
   // павшая подмога
   w.allies = w.allies.filter((al) => { if (al.hp <= 0) { banner(w, `🪦 ${al.name} пал в бою...`); return false; } return true; });
+
+  // ── Туннельный преследователь ──
+  if (w.tunnelChaser) {
+    const tc = w.tunnelChaser;
+    tc.hitCd = Math.max(0, tc.hitCd - dt);
+    const ang = Math.atan2(w.py - tc.y, w.px - tc.x);
+    tc.x += Math.cos(ang) * tc.speed * dt;
+    tc.y += Math.sin(ang) * tc.speed * dt;
+    if (Math.hypot(w.px - tc.x, w.py - tc.y) < tc.r + 18 && tc.hitCd <= 0) {
+      w.frozenTimer = 1.2;
+      w.hp -= 28;
+      w.hurtFlash = 0.5;
+      tc.hitCd = 1.8;
+      banner(w, '❄️ Монстр поймал тебя! −28 HP');
+    }
+  }
   // смерть и деспавн врагов
   w.enemies = w.enemies.filter((e) => {
     if (e.hp <= 0) {
@@ -422,6 +897,7 @@ function update(w: World, dt: number, keys: Set<string>, mouse: { x: number; y: 
     if (Math.hypot(l.x - w.px, l.y - w.py) < l.r + 22) {
       if (addItem(w, l.item, ITEMS[l.item].stackable ? 1 + Math.floor(Math.random() * 2) : 1)) {
         banner(w, `🎒 +${ITEMS[l.item].emoji} ${ITEMS[l.item].name}`);
+        if (l.item === 'fortress_key') w.fortressKeyLoot = null;
         return false;
       }
       return true; // инвентарь полон — оставить
@@ -460,7 +936,7 @@ function render(ctx: CanvasRenderingContext2D, w: World) {
     }
   }
 
-  // крепость (наверху мира)
+  // настоящая крепость (наверху мира)
   const fy = FORTRESS_Y - camY;
   if (fy > -200 && fy < H + 200) {
     ctx.fillStyle = night ? '#2a2d34' : '#8a8275';
@@ -470,6 +946,33 @@ function render(ctx: CanvasRenderingContext2D, w: World) {
     ctx.fillText('🏰 КРЕПОСТЬ-ЛАБОРАТОРИЯ', -camX + WORLD_W / 2, fy - 140);
     ctx.fillStyle = night ? '#3a3d44' : '#9a9285';
     ctx.fillRect(0 - camX, fy, WORLD_W, 14);
+  }
+
+  // ложные крепости
+  for (const ff of FAKE_FORTRESS_DEFS) {
+    const fsy = ff.y - camY, fsx = ff.x - camX;
+    if (fsy < -220 || fsy > H + 220) continue;
+    ctx.fillStyle = night ? '#252830' : '#7a7570';
+    ctx.fillRect(fsx - 200, fsy - 110, 400, 120);
+    ctx.fillStyle = night ? '#3a3d44' : '#928c85';
+    ctx.fillRect(fsx - 260, fsy, 520, 12);
+    ctx.fillStyle = '#c08060'; ctx.font = 'bold 24px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('🏰 КРЕПОСТЬ', fsx, fsy - 128);
+  }
+
+  // объекты загадок
+  for (let i = 0; i < RIDDLE_DEFS.length; i++) {
+    if (w.riddleSolved[i]) continue;
+    const rd = RIDDLE_DEFS[i];
+    const rsx = rd.x - camX, rsy = rd.y - camY;
+    if (rsx < -80 || rsx > W + 80 || rsy < -80 || rsy > H + 80) continue;
+    const gr = ctx.createRadialGradient(rsx, rsy, 0, rsx, rsy, 55);
+    gr.addColorStop(0, 'rgba(210,170,60,0.38)'); gr.addColorStop(1, 'rgba(210,170,60,0)');
+    ctx.fillStyle = gr; ctx.fillRect(rsx - 55, rsy - 55, 110, 110);
+    ctx.font = '36px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(i === 0 ? '📜' : '🗝️', rsx, rsy);
+    ctx.font = 'bold 11px system-ui'; ctx.fillStyle = '#ffd060'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(i === 0 ? 'ЗАГАДКА → КОД' : 'ЗАГАДКА → ОТМЫЧКА', rsx, rsy + 30);
   }
 
   // лут
@@ -532,7 +1035,7 @@ function render(ctx: CanvasRenderingContext2D, w: World) {
   if (night || dusk) {
     const radius = night ? (w.torch ? 360 : 200) : (w.torch ? 460 : 320);
     const g = ctx.createRadialGradient(pcx, pcy, radius * 0.4, pcx, pcy, radius);
-    const edge = night ? 0.92 : 0.6;
+    const edge = night ? 0.46 : 0.6;
     g.addColorStop(0, 'rgba(8,10,16,0)');
     g.addColorStop(1, `rgba(6,8,14,${edge})`);
     ctx.fillStyle = `rgba(6,8,14,${edge})`; ctx.fillRect(0, 0, W, H);
@@ -544,8 +1047,39 @@ function render(ctx: CanvasRenderingContext2D, w: World) {
     void g;
   }
 
+  // туннельный эффект (ивент 2) — тёмное виньетирование без стен
+  if (w.eventId === 2) {
+    const gr = ctx.createRadialGradient(W / 2, H / 2, H * 0.22, W / 2, H / 2, H * 0.72);
+    gr.addColorStop(0, 'rgba(0,0,0,0)');
+    gr.addColorStop(1, 'rgba(4,6,4,0.78)');
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+  }
+
+  // туннельный преследователь
+  if (w.tunnelChaser) {
+    const tc = w.tunnelChaser;
+    const sx = tc.x - camX, sy = tc.y - camY;
+    if (sx > -100 && sx < W + 100 && sy > -100 && sy < H + 100) {
+      const gr = ctx.createRadialGradient(sx, sy, 0, sx, sy, 90);
+      gr.addColorStop(0, 'rgba(220,0,0,0.4)'); gr.addColorStop(1, 'rgba(220,0,0,0)');
+      ctx.fillStyle = gr; ctx.fillRect(sx - 90, sy - 90, 180, 180);
+      ctx.beginPath(); ctx.arc(sx, sy, tc.r + 8, 0, 7);
+      ctx.fillStyle = '#880000'; ctx.fill();
+      ctx.font = '44px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('👾', sx, sy);
+    }
+  }
+
   // урон-вспышка
   if (w.hurtFlash > 0) { ctx.fillStyle = `rgba(200,0,0,${w.hurtFlash * 0.5})`; ctx.fillRect(0, 0, W, H); }
+
+  // заморозка
+  if (w.frozenTimer > 0) {
+    ctx.fillStyle = `rgba(80,160,240,${Math.min(0.38, w.frozenTimer * 0.32)})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(160,220,255,0.55)'; ctx.lineWidth = 5;
+    ctx.strokeRect(3, 3, W - 6, H - 6);
+  }
 
   drawHUD(ctx, w, W, H);
 }
@@ -560,10 +1094,17 @@ function drawHUD(ctx: CanvasRenderingContext2D, w: World, W: number, H: number) 
   ctx.fillText(`❤️ ${Math.ceil(w.hp)}/${w.maxHp}`, 30, 38);
 
   // верхняя инфа
-  const verst = Math.max(0, Math.round((w.py - FORTRESS_Y) / (WORLD_H - FORTRESS_Y) * 100));
   const night = w.time < 0.22 || w.time > 0.74;
   ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.font = 'bold 16px system-ui';
-  ctx.fillText(`📅 День ${w.day}  ·  ${night ? '🌑 Ночь' : '☀️ День'}  ·  🧭 до крепости ${verst} вёрст  ·  ☠️ ${w.kills}`, W / 2, 30);
+  ctx.fillText(`📅 День ${w.day}  ·  ${night ? '🌑 Ночь' : '☀️ День'}  ·  ☠️ ${w.kills}`, W / 2, 30);
+
+  // таймер активного ивента
+  if (w.eventId > 0 && w.eventTimer > 0) {
+    const labels: Record<number, string> = { 1: '⚠️ ХАРДКОР', 2: '🚇 ТУННЕЛЬ', 3: '🌪️ БУРЯ', 4: '👹 НАШЕСТВИЕ', 5: '🔴 БЕРСЕРК' };
+    const lbl = labels[w.eventId] ?? '⚠️ ИВЕНТ';
+    ctx.textAlign = 'right'; ctx.fillStyle = '#ff4422'; ctx.font = 'bold 16px system-ui';
+    ctx.fillText(`${lbl}  ⏱ ${Math.ceil(w.eventTimer)}с`, W - 18, 38);
+  }
 
   // баннер
   if (w.bannerT > 0) {
@@ -572,6 +1113,41 @@ function drawHUD(ctx: CanvasRenderingContext2D, w: World, W: number, H: number) 
     ctx.fillRect(W / 2 - tw / 2, 44, tw, 30);
     ctx.fillStyle = '#ffd9a0'; ctx.font = 'bold 16px system-ui'; ctx.fillText(w.banner, W / 2, 64);
     ctx.globalAlpha = 1;
+  }
+
+  // стрелки к квест-предметам
+  {
+    type QArrow = { wx: number; wy: number; emoji: string; color: string; margin: number };
+    const targets: QArrow[] = [];
+    if (!w.riddleSolved[0]) targets.push({ wx: RIDDLE_DEFS[0].x, wy: RIDDLE_DEFS[0].y, emoji: '📜', color: '#60c8ff', margin: 58 });
+    if (!w.riddleSolved[1]) targets.push({ wx: RIDDLE_DEFS[1].x, wy: RIDDLE_DEFS[1].y, emoji: '🗝️', color: '#c07cff', margin: 80 });
+    if (w.fortressKeyLoot)  targets.push({ wx: w.fortressKeyLoot.x, wy: w.fortressKeyLoot.y, emoji: '🔑', color: '#ffd700', margin: 102 });
+    const pulse = 0.65 + 0.35 * Math.sin(w.playTime * 4);
+    for (const t of targets) {
+      const ang = Math.atan2(t.wy - w.py, t.wx - w.px);
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      const edgeDist = Math.min(
+        (W / 2 - t.margin) / (Math.abs(ca) || 0.001),
+        (H / 2 - t.margin) / (Math.abs(sa) || 0.001),
+      );
+      const ax = W / 2 + ca * edgeDist, ay = H / 2 + sa * edgeDist;
+      const verst = Math.max(1, Math.round(Math.hypot(t.wx - w.px, t.wy - w.py) / 90));
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.shadowColor = t.color; ctx.shadowBlur = 16;
+      ctx.translate(ax, ay); ctx.rotate(ang);
+      ctx.fillStyle = t.color;
+      ctx.beginPath(); ctx.moveTo(18, 0); ctx.lineTo(-8, -9); ctx.lineTo(-8, 9); ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      ctx.globalAlpha = pulse;
+      ctx.font = 'bold 12px system-ui'; ctx.fillStyle = t.color;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+      ctx.fillText(`${t.emoji} ~${verst}в`, W / 2 + ca * (edgeDist - 30), H / 2 + sa * (edgeDist - 30));
+      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    }
+    ctx.textBaseline = 'alphabetic';
   }
 
   // инвентарь (9 слотов снизу)
@@ -595,9 +1171,6 @@ function drawHUD(ctx: CanvasRenderingContext2D, w: World, W: number, H: number) 
 
 // ════════════════════════════ СТИЛИ ════════════════════════════
 const overlay: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 9999, background: '#0c0d11', color: '#e8e6e1', overflow: 'hidden' };
-const introCard: React.CSSProperties = { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(760px, 92vw)', maxHeight: '92vh', overflowY: 'auto', background: '#141519', border: '1px solid #2a2d35', borderRadius: 20, padding: '32px 36px', boxShadow: '0 20px 80px #000a', textAlign: 'center' };
-const story: React.CSSProperties = { textAlign: 'left', lineHeight: 1.6, fontSize: 15.5, color: '#cfccc6', background: '#0e0f13', border: '1px solid #23262e', borderRadius: 14, padding: '18px 22px', marginBottom: 22 };
-const charCard: React.CSSProperties = { flex: 1, border: '2px solid', borderRadius: 14, padding: '16px 14px', cursor: 'pointer', color: '#e8e6e1', display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', textAlign: 'center' };
 const playBtn: React.CSSProperties = { background: '#d97757', color: '#fff', border: 'none', borderRadius: 12, padding: '14px 28px', fontSize: 18, fontWeight: 800, letterSpacing: 1, cursor: 'pointer' };
 const exitBtn: React.CSSProperties = { position: 'absolute', top: 14, right: 16, background: '#000000aa', color: '#fff', border: '1px solid #ffffff33', borderRadius: 10, padding: '8px 12px', fontSize: 13, cursor: 'pointer' };
 const overPanel: React.CSSProperties = { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(560px,92vw)', background: '#141519ee', border: '1px solid #2a2d35', borderRadius: 18, padding: 32, textAlign: 'center', boxShadow: '0 20px 80px #000c' };

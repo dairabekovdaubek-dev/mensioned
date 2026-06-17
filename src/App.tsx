@@ -43,7 +43,7 @@ export default function App() {
 
       {/* Игра — полноэкранный оверлей поверх всего. Иначе — обычный поток входа/приложения. */}
       {playing && <QasqyrGame onExit={() => setPlaying(false)} />}
-      {!session ? <Auth /> : <Entries userEmail={session.user.email ?? ''} />}
+      {!session ? <Auth onPlayAsGuest={() => setPlaying(true)} /> : <Entries userEmail={session.user.email ?? ''} />}
     </main>
   );
 }
