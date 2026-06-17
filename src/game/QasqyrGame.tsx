@@ -9,7 +9,7 @@ const WORLD_H = 20000;  // высота: старт внизу, крепость
 const FORTRESS_Y = 160; // дойти сюда = победа
 
 const WALK = 215;       // скорость ходьбы px/с
-const SNEAK = 115;      // скорость крадучись
+const SNEAK = 195;      // скорость крадучись
 
 // ── Типы сущностей ──
 type EnemyKind = 'shala' | 'sokyr' | 'jarylys' | 'alyp' | 'wolf';
@@ -64,11 +64,11 @@ interface World {
 }
 
 const ENEMY_DEFS: Record<EnemyKind, { hp: number; r: number; speed: number; dmg: number; color: string; emoji: string; name: string }> = {
-  shala:   { hp: 40,  r: 16, speed: 95,  dmg: 16, color: '#6b8f3a', emoji: '🧟',   name: 'Шала' },
-  sokyr:   { hp: 60,  r: 17, speed: 70,  dmg: 22, color: '#4a6b6b', emoji: '🧟‍♂️', name: 'Сокыр' },
-  jarylys: { hp: 35,  r: 19, speed: 60,  dmg: 12, color: '#8a8f3a', emoji: '🤢',   name: 'Жарылыс' },
-  alyp:    { hp: 130, r: 28, speed: 55,  dmg: 30, color: '#7a4a3a', emoji: '👹',   name: 'Алып' },
-  wolf:    { hp: 45,  r: 15, speed: 205, dmg: 20, color: '#777',    emoji: '🐺',   name: 'Волк' },
+  shala:   { hp: 40,  r: 16, speed: 161, dmg: 16, color: '#6b8f3a', emoji: '🧟',   name: 'Шала' },
+  sokyr:   { hp: 60,  r: 17, speed: 119, dmg: 22, color: '#4a6b6b', emoji: '🧟‍♂️', name: 'Сокыр' },
+  jarylys: { hp: 35,  r: 19, speed: 102, dmg: 12, color: '#8a8f3a', emoji: '🤢',   name: 'Жарылыс' },
+  alyp:    { hp: 130, r: 28, speed: 93,  dmg: 30, color: '#7a4a3a', emoji: '👹',   name: 'Алып' },
+  wolf:    { hp: 45,  r: 15, speed: 278, dmg: 20, color: '#777',    emoji: '🐺',   name: 'Волк' },
 };
 
 const LOOT_TABLE: ItemId[] = ['food', 'medkit', 'herb', 'cloth', 'metal', 'spirit', 'ammo', 'ammo', 'ammo', 'revolver', 'revolver', 'rifle', 'rifle', 'club'];
@@ -790,8 +790,8 @@ function update(w: World, dt: number, keys: Set<string>, mouse: { x: number; y: 
 
   // спавн врагов
   w.spawnTimer -= dt;
-  const cap = w.eventId === 1 ? 50 : (night ? 32 : 20);
-  const spawnRate = w.eventId === 1 ? 0.28 : (night ? 0.6 : 1.0);
+  const cap = w.eventId === 1 ? 80 : (night ? 60 : 45);
+  const spawnRate = w.eventId === 1 ? 0.09 : (night ? 0.2 : 0.33);
   if (w.spawnTimer <= 0 && w.enemies.length < cap) {
     w.spawnTimer = spawnRate;
     const ang = Math.random() * Math.PI * 2;
@@ -910,164 +910,255 @@ function update(w: World, dt: number, keys: Set<string>, mouse: { x: number; y: 
   if (w.hp <= 0) { w.hp = 0; finish('lose'); }
 }
 
-// ════════════════════════════ РЕНДЕР ════════════════════════════
+// ════════════════════════════ РЕНДЕР (вид от третьего лица) ════════════════════════════
 function render(ctx: CanvasRenderingContext2D, w: World) {
   const W = window.innerWidth, H = window.innerHeight;
-  const camX = w.px - W / 2, camY = w.py - H / 2;
   const night = w.time < 0.22 || w.time > 0.74;
-  const dusk = (w.time >= 0.22 && w.time < 0.3) || (w.time > 0.66 && w.time <= 0.74);
+  const dusk  = (w.time >= 0.22 && w.time < 0.3) || (w.time > 0.66 && w.time <= 0.74);
 
-  // фон-степь
-  ctx.fillStyle = night ? '#1a2417' : dusk ? '#5c6e3a' : '#7c9a48';
-  ctx.fillRect(0, 0, W, H);
+  // ── Камера: чуть позади игрока, смотрит на север (уменьшение Y = вперёд) ──
+  const CAM_BACK = 160;  // мировых единиц позади игрока
+  const CAM_H    = 88;   // высота камеры над землёй
+  const FOCAL    = 460;  // фокусное расстояние
+  const HORIZ    = Math.floor(H * 0.42); // горизонт на экране
 
-  // травяные кустики (детерминированно по сетке)
-  const cell = 90;
-  ctx.strokeStyle = night ? '#24331c' : '#6b8a3c';
-  ctx.lineWidth = 2;
-  const x0 = Math.floor(camX / cell), y0 = Math.floor(camY / cell);
-  for (let gx = x0 - 1; gx < x0 + W / cell + 2; gx++) {
-    for (let gy = y0 - 1; gy < y0 + H / cell + 2; gy++) {
-      const h = hash(gx * 92.1 + gy * 13.7);
-      if (h < 0.55) continue;
-      const sx = gx * cell + hash(gx * 3.3 + gy) * cell - camX;
-      const sy = gy * cell + hash(gy * 5.1 + gx) * cell - camY;
-      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx - 3, sy - 8); ctx.moveTo(sx, sy); ctx.lineTo(sx + 3, sy - 8); ctx.stroke();
+  // Проекция мировой точки на экран. null = за камерой
+  function proj(wx: number, wy: number) {
+    const d = (w.py + CAM_BACK) - wy; // глубина: >0 = перед камерой
+    if (d < 1) return null;
+    return { sx: W / 2 + ((wx - w.px) / d) * FOCAL, sy: HORIZ + (CAM_H / d) * FOCAL, sc: FOCAL / d, d };
+  }
+  // туман прозрачности по дистанции
+  function fog(d: number) { return Math.min(1, Math.max(0.06, 1 - d / (night ? 7000 : 18000))); }
+
+  // ── 1. Небо ──
+  const skyG = ctx.createLinearGradient(0, 0, 0, HORIZ);
+  if (night)     { skyG.addColorStop(0, '#040810'); skyG.addColorStop(1, '#0d1828'); }
+  else if (dusk) { skyG.addColorStop(0, '#0e0608'); skyG.addColorStop(1, '#7a3818'); }
+  else           { skyG.addColorStop(0, '#0c1610'); skyG.addColorStop(1, '#3a5e38'); }
+  ctx.fillStyle = skyG; ctx.fillRect(0, 0, W, HORIZ);
+  // звёзды ночью
+  if (night) {
+    for (let i = 0; i < 90; i++) {
+      ctx.fillStyle = `rgba(255,255,240,${0.4 + hash(i * 5.1) * 0.5})`;
+      ctx.beginPath(); ctx.arc(hash(i * 13.7) * W, hash(i * 27.3 + 1) * HORIZ * 0.92,
+        hash(i * 9.3 + 3) < 0.2 ? 1.4 : 0.9, 0, 7); ctx.fill();
     }
   }
 
-  // настоящая крепость (наверху мира)
-  const fy = FORTRESS_Y - camY;
-  if (fy > -200 && fy < H + 200) {
-    ctx.fillStyle = night ? '#2a2d34' : '#8a8275';
-    ctx.fillRect(-camX + WORLD_W / 2 - 220, fy - 120, 440, 130);
-    ctx.fillStyle = '#d97757';
-    ctx.font = 'bold 26px system-ui'; ctx.textAlign = 'center';
-    ctx.fillText('🏰 КРЕПОСТЬ-ЛАБОРАТОРИЯ', -camX + WORLD_W / 2, fy - 140);
-    ctx.fillStyle = night ? '#3a3d44' : '#9a9285';
-    ctx.fillRect(0 - camX, fy, WORLD_W, 14);
+  // ── 2. Земля ──
+  const gG = ctx.createLinearGradient(0, HORIZ, 0, H);
+  gG.addColorStop(0, night ? '#0c140c' : dusk ? '#2a3618' : '#456228');
+  gG.addColorStop(1, night ? '#1a2417' : dusk ? '#5a6e36' : '#7a9a48');
+  ctx.fillStyle = gG; ctx.fillRect(0, HORIZ, W, H - HORIZ);
+  // перспективные линии земли
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = night ? 'rgba(36,51,28,0.22)' : dusk ? 'rgba(70,80,40,0.2)' : 'rgba(80,110,45,0.22)';
+  for (let depth = 30; depth < 8000; depth = depth < 200 ? depth + 30 : depth < 1200 ? depth + 130 : depth + 700) {
+    const sy = HORIZ + (CAM_H / depth) * FOCAL; if (sy > H + 2) break;
+    ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke();
+  }
+  for (let i = -14; i <= 14; i++) {
+    const wx = w.px + i * 300;
+    ctx.beginPath();
+    ctx.moveTo(W / 2 + ((wx - w.px) / 9000) * FOCAL, HORIZ);
+    ctx.lineTo(W / 2 + ((wx - w.px) / 1) * FOCAL, H);
+    ctx.stroke();
   }
 
-  // ложные крепости
+  // ── 3. Сбор и сортировка объектов по глубине (художник) ──
+  const calls: { d: number; fn: () => void }[] = [];
+
+  // Настоящая крепость
+  calls.push({ d: (w.py + CAM_BACK) - FORTRESS_Y, fn: () => {
+    const p = proj(WORLD_W / 2, FORTRESS_Y); if (!p) return;
+    ctx.globalAlpha = fog(p.d);
+    const fw = Math.min(W * 0.95, Math.max(6, 800 * p.sc));
+    const fh = Math.min(H * 0.85, Math.max(4, 400 * p.sc));
+    ctx.fillStyle = night ? '#282b34' : '#8a8275';
+    ctx.fillRect(p.sx - fw / 2, p.sy - fh, fw, fh);
+    // башни
+    const tw = Math.max(2, fw * 0.16), th = fh * 1.25;
+    ctx.fillStyle = night ? '#1e2028' : '#6a6460';
+    ctx.fillRect(p.sx - fw / 2 - tw * 0.2, p.sy - th, tw, th);
+    ctx.fillRect(p.sx + fw / 2 - tw * 0.8, p.sy - th, tw, th);
+    // ворота
+    ctx.fillStyle = '#040406';
+    ctx.fillRect(p.sx - Math.max(1, fw * 0.06), p.sy - fh * 0.38, Math.max(1, fw * 0.12), fh * 0.38);
+    if (p.sc > 0.012) {
+      ctx.font = `bold ${Math.max(8, Math.min(22, 18 * p.sc))}px system-ui`;
+      ctx.fillStyle = '#d97757'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText('🏰 КРЕПОСТЬ-ЛАБОРАТОРИЯ', p.sx, p.sy - fh - 3);
+    }
+    ctx.globalAlpha = 1;
+  }});
+
+  // Ложные крепости
   for (const ff of FAKE_FORTRESS_DEFS) {
-    const fsy = ff.y - camY, fsx = ff.x - camX;
-    if (fsy < -220 || fsy > H + 220) continue;
-    ctx.fillStyle = night ? '#252830' : '#7a7570';
-    ctx.fillRect(fsx - 200, fsy - 110, 400, 120);
-    ctx.fillStyle = night ? '#3a3d44' : '#928c85';
-    ctx.fillRect(fsx - 260, fsy, 520, 12);
-    ctx.fillStyle = '#c08060'; ctx.font = 'bold 24px system-ui'; ctx.textAlign = 'center';
-    ctx.fillText('🏰 КРЕПОСТЬ', fsx, fsy - 128);
+    calls.push({ d: (w.py + CAM_BACK) - ff.y, fn: () => {
+      const p = proj(ff.x, ff.y); if (!p) return;
+      ctx.globalAlpha = fog(p.d);
+      const fw = Math.min(W * 0.85, Math.max(5, 650 * p.sc));
+      const fh = Math.min(H * 0.75, Math.max(3, 320 * p.sc));
+      ctx.fillStyle = night ? '#232630' : '#7a7570';
+      ctx.fillRect(p.sx - fw / 2, p.sy - fh, fw, fh);
+      ctx.fillStyle = '#050407';
+      ctx.fillRect(p.sx - Math.max(1, fw * 0.05), p.sy - fh * 0.35, Math.max(1, fw * 0.10), fh * 0.35);
+      if (p.sc > 0.012) {
+        ctx.font = `bold ${Math.max(7, Math.min(18, 14 * p.sc))}px system-ui`;
+        ctx.fillStyle = '#c08060'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText('🏰 КРЕПОСТЬ', p.sx, p.sy - fh - 3);
+      }
+      ctx.globalAlpha = 1;
+    }});
   }
 
-  // объекты загадок
+  // Загадки
   for (let i = 0; i < RIDDLE_DEFS.length; i++) {
     if (w.riddleSolved[i]) continue;
     const rd = RIDDLE_DEFS[i];
-    const rsx = rd.x - camX, rsy = rd.y - camY;
-    if (rsx < -80 || rsx > W + 80 || rsy < -80 || rsy > H + 80) continue;
-    const gr = ctx.createRadialGradient(rsx, rsy, 0, rsx, rsy, 55);
-    gr.addColorStop(0, 'rgba(210,170,60,0.38)'); gr.addColorStop(1, 'rgba(210,170,60,0)');
-    ctx.fillStyle = gr; ctx.fillRect(rsx - 55, rsy - 55, 110, 110);
-    ctx.font = '36px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(i === 0 ? '📜' : '🗝️', rsx, rsy);
-    ctx.font = 'bold 11px system-ui'; ctx.fillStyle = '#ffd060'; ctx.textBaseline = 'alphabetic';
-    ctx.fillText(i === 0 ? 'ЗАГАДКА → КОД' : 'ЗАГАДКА → ОТМЫЧКА', rsx, rsy + 30);
+    calls.push({ d: (w.py + CAM_BACK) - rd.y, fn: () => {
+      const p = proj(rd.x, rd.y); if (!p || p.sx < -60 || p.sx > W + 60 || p.sy > H + 40) return;
+      ctx.globalAlpha = Math.min(0.95, fog(p.d) * 1.4);
+      const sz = Math.max(8, Math.min(38, 30 * p.sc));
+      const gr = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, sz * 1.6);
+      gr.addColorStop(0, 'rgba(210,170,60,0.4)'); gr.addColorStop(1, 'rgba(210,170,60,0)');
+      ctx.fillStyle = gr; ctx.fillRect(p.sx - sz * 2, p.sy - sz * 2, sz * 4, sz * 4);
+      ctx.font = `${sz}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(i === 0 ? '📜' : '🗝️', p.sx, p.sy);
+      if (sz > 10) {
+        ctx.font = `bold ${Math.max(6, sz * 0.4)}px system-ui`;
+        ctx.fillStyle = '#ffd060'; ctx.textBaseline = 'top';
+        ctx.fillText(i === 0 ? 'КОД' : 'ОТМЫЧКА', p.sx, p.sy + sz * 0.55);
+      }
+      ctx.globalAlpha = 1;
+    }});
   }
 
-  // лут
+  // Лут
   for (const l of w.loot) {
-    const sx = l.x - camX, sy = l.y - camY;
-    if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
-    ctx.font = '22px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.globalAlpha = 0.9; ctx.fillText('📦', sx, sy); ctx.globalAlpha = 1;
+    calls.push({ d: (w.py + CAM_BACK) - l.y, fn: () => {
+      const p = proj(l.x, l.y); if (!p || p.sx < -50 || p.sx > W + 50 || p.sy > H + 30) return;
+      ctx.globalAlpha = Math.min(0.9, fog(p.d) * 1.3);
+      const sz = Math.max(7, Math.min(28, 22 * p.sc));
+      ctx.font = `${sz}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(ITEMS[l.item].emoji, p.sx, p.sy);
+      ctx.globalAlpha = 1;
+    }});
   }
 
-  // пули
-  ctx.fillStyle = '#ffe08a';
-  for (const b of w.bullets) { ctx.beginPath(); ctx.arc(b.x - camX, b.y - camY, 4, 0, 7); ctx.fill(); }
+  // Пули
+  for (const b of w.bullets) {
+    calls.push({ d: (w.py + CAM_BACK) - b.y, fn: () => {
+      const p = proj(b.x, b.y); if (!p) return;
+      ctx.fillStyle = '#ffe08a';
+      ctx.beginPath(); ctx.arc(p.sx, p.sy, Math.max(1.5, 4 * p.sc), 0, 7); ctx.fill();
+    }});
+  }
 
-  // враги
+  // Враги
   for (const e of w.enemies) {
-    const sx = e.x - camX, sy = e.y - camY;
-    if (sx < -60 || sx > W + 60 || sy < -60 || sy > H + 60) continue;
-    const d = ENEMY_DEFS[e.kind];
-    ctx.beginPath(); ctx.arc(sx, sy, e.r, 0, 7);
-    ctx.fillStyle = e.hitFlash > 0 ? '#fff' : d.color; ctx.fill();
-    ctx.font = `${e.r + 6}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(d.emoji, sx, sy);
-    // hp бар
-    if (e.hp < e.maxHp) {
-      ctx.fillStyle = '#000a'; ctx.fillRect(sx - e.r, sy - e.r - 9, e.r * 2, 4);
-      ctx.fillStyle = '#d9534f'; ctx.fillRect(sx - e.r, sy - e.r - 9, e.r * 2 * (e.hp / e.maxHp), 4);
-    }
+    calls.push({ d: (w.py + CAM_BACK) - e.y, fn: () => {
+      const p = proj(e.x, e.y); if (!p || p.sx < -100 || p.sx > W + 100 || p.sy > H + 60) return;
+      ctx.globalAlpha = Math.min(1, fog(p.d) * 1.5);
+      const d = ENEMY_DEFS[e.kind];
+      const r = Math.max(5, Math.min(62, e.r * p.sc * 2.4));
+      // тень
+      ctx.beginPath(); ctx.ellipse(p.sx, p.sy + r * 0.28, r * 0.82, r * 0.26, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.fill();
+      // тело
+      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, 7);
+      ctx.fillStyle = e.hitFlash > 0 ? '#fff' : d.color; ctx.fill();
+      ctx.font = `${Math.max(8, r * 1.6)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(d.emoji, p.sx, p.sy);
+      if (e.hp < e.maxHp) {
+        const bw = r * 2.8;
+        ctx.fillStyle = '#000a'; ctx.fillRect(p.sx - bw / 2, p.sy - r - 12, bw, 5);
+        ctx.fillStyle = '#d9534f'; ctx.fillRect(p.sx - bw / 2, p.sy - r - 12, bw * (e.hp / e.maxHp), 5);
+      }
+      ctx.globalAlpha = 1;
+    }});
   }
 
-  // союзники (подмога)
+  // Союзники
   for (const al of w.allies) {
-    const sx = al.x - camX, sy = al.y - camY;
-    if (sx < -60 || sx > W + 60 || sy < -60 || sy > H + 60) continue;
-    ctx.beginPath(); ctx.arc(sx, sy, al.r, 0, 7);
-    ctx.fillStyle = '#3a7d44'; ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = '#9be7a8'; ctx.stroke();
-    ctx.font = '20px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(al.emoji, sx, sy);
-    ctx.fillStyle = '#000a'; ctx.fillRect(sx - al.r, sy - al.r - 8, al.r * 2, 4);
-    ctx.fillStyle = '#5fb87a'; ctx.fillRect(sx - al.r, sy - al.r - 8, al.r * 2 * (al.hp / al.maxHp), 4);
+    calls.push({ d: (w.py + CAM_BACK) - al.y, fn: () => {
+      const p = proj(al.x, al.y); if (!p || p.sx < -100 || p.sx > W + 100 || p.sy > H + 60) return;
+      ctx.globalAlpha = Math.min(1, fog(p.d) * 1.5);
+      const r = Math.max(5, Math.min(50, 15 * p.sc * 2.4));
+      ctx.beginPath(); ctx.ellipse(p.sx, p.sy + r * 0.28, r * 0.82, r * 0.26, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.32)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, 7);
+      ctx.fillStyle = '#3a7d44'; ctx.fill();
+      ctx.lineWidth = Math.max(1, 2 * p.sc); ctx.strokeStyle = '#9be7a8'; ctx.stroke();
+      ctx.font = `${Math.max(8, r * 1.4)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(al.emoji, p.sx, p.sy);
+      const bw = r * 2.8;
+      ctx.fillStyle = '#000a'; ctx.fillRect(p.sx - bw / 2, p.sy - r - 10, bw, 4);
+      ctx.fillStyle = '#5fb87a'; ctx.fillRect(p.sx - bw / 2, p.sy - r - 10, bw * (al.hp / al.maxHp), 4);
+      ctx.globalAlpha = 1;
+    }});
   }
 
-  // игрок
-  const pcx = W / 2, pcy = H / 2;
-  // взмах оружия
-  if (w.attackTimer > 0) {
-    ctx.strokeStyle = '#fff8'; ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.arc(pcx, pcy, 56, w.aim - 0.9, w.aim + 0.9); ctx.stroke();
-  }
-  ctx.beginPath(); ctx.arc(pcx, pcy, 17, 0, 7);
-  ctx.fillStyle = w.hurtFlash > 0 ? '#ff6b6b' : (w.char === 'erlan' ? '#c98a4a' : '#4a90c9'); ctx.fill();
-  ctx.font = '22px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(CHARACTERS[w.char].emoji, pcx, pcy);
-  // ствол/прицел
-  ctx.strokeStyle = '#fff9'; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(pcx, pcy); ctx.lineTo(pcx + Math.cos(w.aim) * 26, pcy + Math.sin(w.aim) * 26); ctx.stroke();
-
-  // тьма ночью + свет факела
-  if (night || dusk) {
-    const radius = night ? (w.torch ? 360 : 200) : (w.torch ? 460 : 320);
-    const g = ctx.createRadialGradient(pcx, pcy, radius * 0.4, pcx, pcy, radius);
-    const edge = night ? 0.46 : 0.6;
-    g.addColorStop(0, 'rgba(8,10,16,0)');
-    g.addColorStop(1, `rgba(6,8,14,${edge})`);
-    ctx.fillStyle = `rgba(6,8,14,${edge})`; ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = 'destination-out';
-    const hole = ctx.createRadialGradient(pcx, pcy, 0, pcx, pcy, radius);
-    hole.addColorStop(0, 'rgba(0,0,0,1)'); hole.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = hole; ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = 'source-over';
-    void g;
-  }
-
-  // туннельный эффект (ивент 2) — тёмное виньетирование без стен
-  if (w.eventId === 2) {
-    const gr = ctx.createRadialGradient(W / 2, H / 2, H * 0.22, W / 2, H / 2, H * 0.72);
-    gr.addColorStop(0, 'rgba(0,0,0,0)');
-    gr.addColorStop(1, 'rgba(4,6,4,0.78)');
-    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
-  }
-
-  // туннельный преследователь
+  // Туннельный преследователь
   if (w.tunnelChaser) {
     const tc = w.tunnelChaser;
-    const sx = tc.x - camX, sy = tc.y - camY;
-    if (sx > -100 && sx < W + 100 && sy > -100 && sy < H + 100) {
-      const gr = ctx.createRadialGradient(sx, sy, 0, sx, sy, 90);
-      gr.addColorStop(0, 'rgba(220,0,0,0.4)'); gr.addColorStop(1, 'rgba(220,0,0,0)');
-      ctx.fillStyle = gr; ctx.fillRect(sx - 90, sy - 90, 180, 180);
-      ctx.beginPath(); ctx.arc(sx, sy, tc.r + 8, 0, 7);
+    calls.push({ d: (w.py + CAM_BACK) - tc.y, fn: () => {
+      const p = proj(tc.x, tc.y); if (!p) return;
+      ctx.globalAlpha = Math.min(1, fog(p.d) * 1.8);
+      const r = Math.max(8, Math.min(80, tc.r * p.sc * 2.6));
+      const gr = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r * 2.5);
+      gr.addColorStop(0, 'rgba(220,0,0,0.55)'); gr.addColorStop(1, 'rgba(220,0,0,0)');
+      ctx.fillStyle = gr; ctx.fillRect(p.sx - r * 2.5, p.sy - r * 2.5, r * 5, r * 5);
+      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, 7);
       ctx.fillStyle = '#880000'; ctx.fill();
-      ctx.font = '44px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('👾', sx, sy);
+      ctx.font = `${Math.max(12, r * 1.6)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('👾', p.sx, p.sy);
+      ctx.globalAlpha = 1;
+    }});
+  }
+
+  // Игрок — фиксирован внизу по центру
+  calls.push({ d: CAM_BACK, fn: () => {
+    const pcx = W / 2, pcy = Math.floor(H * 0.76);
+    ctx.beginPath(); ctx.ellipse(pcx, pcy + 26, 28, 10, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
+    if (w.attackTimer > 0) {
+      ctx.strokeStyle = '#fff8'; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(pcx, pcy, 54, w.aim - 0.85, w.aim + 0.85); ctx.stroke();
     }
+    ctx.beginPath(); ctx.arc(pcx, pcy, 24, 0, 7);
+    ctx.fillStyle = w.hurtFlash > 0 ? '#ff6b6b' : (w.char === 'erlan' ? '#c98a4a' : '#4a90c9');
+    ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#ffffff44'; ctx.stroke();
+    ctx.font = '30px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(CHARACTERS[w.char].emoji, pcx, pcy);
+    ctx.strokeStyle = '#fff9'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(pcx, pcy); ctx.lineTo(pcx + Math.cos(w.aim) * 34, pcy + Math.sin(w.aim) * 34); ctx.stroke();
+  }});
+
+  // Сортировка по глубине и отрисовка
+  calls.sort((a, b) => b.d - a.d);
+  for (const c of calls) c.fn();
+
+  // ── 4. Тьма ночью + свет факела ──
+  if (night || dusk) {
+    const edge = night ? 0.50 : 0.32;
+    ctx.fillStyle = `rgba(5,7,13,${edge})`; ctx.fillRect(0, 0, W, H);
+    const pcx = W / 2, pcy = Math.floor(H * 0.76);
+    const radius = night ? (w.torch ? 300 : 170) : (w.torch ? 420 : 260);
+    ctx.globalCompositeOperation = 'destination-out';
+    const hole = ctx.createRadialGradient(pcx, pcy, 0, pcx, pcy, radius);
+    hole.addColorStop(0, `rgba(0,0,0,${edge})`); hole.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = hole; ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // туннельный ивент — виньетка
+  if (w.eventId === 2) {
+    const gr = ctx.createRadialGradient(W / 2, H / 2, H * 0.22, W / 2, H / 2, H * 0.72);
+    gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(4,6,4,0.78)');
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
   }
 
   // урон-вспышка
@@ -1075,10 +1166,8 @@ function render(ctx: CanvasRenderingContext2D, w: World) {
 
   // заморозка
   if (w.frozenTimer > 0) {
-    ctx.fillStyle = `rgba(80,160,240,${Math.min(0.38, w.frozenTimer * 0.32)})`;
-    ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = 'rgba(160,220,255,0.55)'; ctx.lineWidth = 5;
-    ctx.strokeRect(3, 3, W - 6, H - 6);
+    ctx.fillStyle = `rgba(80,160,240,${Math.min(0.38, w.frozenTimer * 0.32)})`; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(160,220,255,0.55)'; ctx.lineWidth = 5; ctx.strokeRect(3, 3, W - 6, H - 6);
   }
 
   drawHUD(ctx, w, W, H);
