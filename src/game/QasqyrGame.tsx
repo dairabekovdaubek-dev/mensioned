@@ -1,1265 +1,3319 @@
-import { useEffect, useRef, useState } from 'react';
-import { CHARACTERS, ITEMS, type CharacterId, type ItemId } from './engine';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import * as THREE from 'three';
 
-// ════════════════════════════ 2D SURVIVAL — QASQYR ════════════════════════════
-// Вид сверху, движение в реальном времени (WASD). Canvas на весь экран.
+type WeaponKind = 'knife' | 'club' | 'sabre' | 'rifle';
+type PickupKind = 'medkit' | 'crystal' | 'key' | 'code' | WeaponKind;
+type EventKind = 'ambush' | 'storm' | 'rage' | 'starvation';
+type GamePhase = 'intro' | 'playing' | 'won' | 'lost';
+type Dimension = 'steppe' | 'hloddev';
+type NpcMood = 'neutral' | 'evil' | 'good';
+type DialogEffect = 'story' | 'heal' | 'medkit' | 'weapon' | 'damage' | 'steal' | 'ambush';
+type Difficulty = 'story' | 'survival' | 'nightmare';
+type VisionKind = '' | 'bloodmoon' | 'echo' | 'whiteout';
+type DayPhase = 'dawn' | 'day' | 'dusk' | 'night';
+type WalkMode = 'walk' | 'sneak' | 'sprint' | 'tired';
 
-const WORLD_W = 7200;   // ширина мира (px)
-const WORLD_H = 20000;  // высота: старт внизу, крепость наверху (y≈0)
-const FORTRESS_Y = 160; // дойти сюда = победа
-
-const WALK = 215;       // скорость ходьбы px/с
-const SNEAK = 195;      // скорость крадучись
-
-// ── Типы сущностей ──
-type EnemyKind = 'shala' | 'sokyr' | 'jarylys' | 'alyp' | 'wolf';
-interface Enemy { x: number; y: number; hp: number; maxHp: number; r: number; kind: EnemyKind; speed: number; dmg: number; hitFlash: number; }
-interface Ally { x: number; y: number; hp: number; maxHp: number; r: number; cd: number; name: string; emoji: string; }
-interface Loot { x: number; y: number; item: ItemId; r: number; }
-interface Bullet { x: number; y: number; vx: number; vy: number; life: number; }
-interface Slot { item: ItemId; count: number; }
-
-interface TunnelChaser { x: number; y: number; speed: number; r: number; hitCd: number; }
-
-interface World {
-  char: CharacterId;
-  px: number; py: number; pvx: number; pvy: number;
-  hp: number; maxHp: number;
-  aim: number;             // угол прицела (к мыши)
-  facing: number;          // последнее направление движения
-  sneaking: boolean;
-  torch: boolean;
-  enemies: Enemy[];
-  allies: Ally[];
-  allyTimer: number;
-  loot: Loot[];
-  bullets: Bullet[];
-  inv: (Slot | null)[];
-  equipped: number | null;
-  time: number;            // 0..1 сутки
-  day: number;
-  kills: number;
-  attackTimer: number;
-  attackCd: number;
-  wantsAttack: boolean;
-  spawnTimer: number;
-  hurtFlash: number;
-  result: '' | 'win' | 'lose';
-  banner: string;
-  bannerT: number;
-  // ── Загадки и ложные крепости ──
-  nearRiddle: number;      // -1 = нет, 0/1 = индекс загадки рядом
-  riddleSolved: boolean[]; // [false, false] изначально
-  fakeFortressMock: number;// кулдаун насмешки
-  fortressKeyLoot: { x: number; y: number } | null; // позиция ключа на карте
-  // ── Системы ивентов ──
-  playTime: number;        // секунды с начала игры
-  eventId: number;         // 0=нет, 1=хардкор, 2=туннель, 3=буря, 4=нашествие, 5=берсерк
-  eventTimer: number;      // осталось секунд текущего ивента
-  nextEventIn: number;     // секунд до следующего ивента
-  eventCount: number;      // сколько ивентов запущено всего
-  frozenTimer: number;     // секунды заморозки игрока
-  berserkMult: number;     // множитель скорости врагов (берсерк)
-  tunnelChaser: TunnelChaser | null;
-}
-
-const ENEMY_DEFS: Record<EnemyKind, { hp: number; r: number; speed: number; dmg: number; color: string; emoji: string; name: string }> = {
-  shala:   { hp: 40,  r: 16, speed: 161, dmg: 16, color: '#6b8f3a', emoji: '🧟',   name: 'Шала' },
-  sokyr:   { hp: 60,  r: 17, speed: 119, dmg: 22, color: '#4a6b6b', emoji: '🧟‍♂️', name: 'Сокыр' },
-  jarylys: { hp: 35,  r: 19, speed: 102, dmg: 12, color: '#8a8f3a', emoji: '🤢',   name: 'Жарылыс' },
-  alyp:    { hp: 130, r: 28, speed: 93,  dmg: 30, color: '#7a4a3a', emoji: '👹',   name: 'Алып' },
-  wolf:    { hp: 45,  r: 15, speed: 278, dmg: 20, color: '#777',    emoji: '🐺',   name: 'Волк' },
+type Enemy = {
+  mesh: THREE.Group;
+  hp: number;
+  speed: number;
+  damage: number;
+  hitTimer: number;
 };
 
-const LOOT_TABLE: ItemId[] = ['food', 'medkit', 'herb', 'cloth', 'metal', 'spirit', 'ammo', 'ammo', 'ammo', 'revolver', 'revolver', 'rifle', 'rifle', 'club'];
+type Pickup = {
+  mesh: THREE.Object3D;
+  kind: PickupKind;
+};
 
-// Подмога — союзники, что приходят на помощь
-const ALLY_POOL: { name: string; emoji: string; hp: number }[] = [
-  { name: 'Кочевник с берданкой', emoji: '🧔', hp: 70 },
-  { name: 'Казак-разведчик', emoji: '💂', hp: 90 },
-  { name: 'Охотник Степи', emoji: '🏹', hp: 80 },
-  { name: 'Беглая знахарка', emoji: '🧕', hp: 60 },
-  { name: 'Старый табиб', emoji: '👴', hp: 55 },
+type InventoryEntry = {
+  kind: PickupKind;
+  count: number;
+};
+
+type FakeFortress = {
+  id: number;
+  x: number;
+  z: number;
+  triggered: boolean;
+  message: string;
+};
+
+type QuestItem = {
+  x: number;
+  z: number;
+  collected: boolean;
+};
+
+type NpcChoice = {
+  text: string;
+  reply: string;
+  effect: DialogEffect;
+};
+
+type HouseNpc = {
+  id: number;
+  name: string;
+  mood: NpcMood;
+  x: number;
+  z: number;
+  title: string;
+  story: string;
+  choices: NpcChoice[];
+  visited: boolean;
+};
+
+type DialogState = {
+  npc: HouseNpc;
+  step: number;
+  lastReply: string;
+};
+
+type PhysicsObstacle = {
+  key: string;
+  x: number;
+  z: number;
+  radius: number;
+  kind: 'solid' | 'water';
+};
+
+type DustPuff = {
+  mesh: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
+  life: number;
+  age: number;
+};
+
+type StoryFlags = {
+  trust: number;
+  lore: number;
+  risk: number;
+  cruelty: number;
+};
+
+const WORLD_HALF = 140;
+const START_Z = 105;
+const FINISH_Z = -680;
+const PLAYER_SPEED = 32;
+const PLAYER_ACCEL = 112;
+const PLAYER_FRICTION = 8.4;
+const PLAYER_RADIUS = 1.15;
+const PLAYER_TURN_SPEED = 8.5;
+const ENEMY_RADIUS = 1.35;
+const EVENT_INTERVAL = 60;
+const EVENT_DURATION = 18;
+const TELEPORT_DURATION = 11;
+const TELEPORT_COOLDOWN = 24;
+const CHUNK_SIZE = 90;
+const CHUNK_RADIUS = 2;
+const FAR_WORLD_LIMIT = 100000;
+const DAY_LENGTH = 210;
+const STAMINA_MAX = 100;
+
+const DIFFICULTY: Record<Difficulty, {
+  label: string;
+  hp: number;
+  enemyHp: number;
+  enemySpeed: number;
+  enemyDamage: number;
+  spawn: number;
+  eventInterval: number;
+  score: number;
+}> = {
+  story: { label: 'Story', hp: 125, enemyHp: 0.82, enemySpeed: 0.88, enemyDamage: 0.72, spawn: 1.28, eventInterval: 78, score: 0.85 },
+  survival: { label: 'Survival', hp: 100, enemyHp: 1, enemySpeed: 1, enemyDamage: 1, spawn: 1, eventInterval: 60, score: 1 },
+  nightmare: { label: 'Nightmare', hp: 82, enemyHp: 1.32, enemySpeed: 1.22, enemyDamage: 1.36, spawn: 0.72, eventInterval: 42, score: 1.35 },
+};
+
+const WEAPONS: Record<WeaponKind, { name: string; damage: number; range: number; cooldown: number; color: number }> = {
+  knife: { name: 'Нож', damage: 24, range: 5.3, cooldown: 0.42, color: 0xd9dde4 },
+  club: { name: 'Дубина', damage: 34, range: 5.9, cooldown: 0.58, color: 0x7a4a2a },
+  sabre: { name: 'Сабля', damage: 45, range: 6.8, cooldown: 0.46, color: 0xe8edf4 },
+  rifle: { name: 'Ружье', damage: 72, range: 18, cooldown: 0.88, color: 0x2b2420 },
+};
+
+const ITEM_LABELS: Record<PickupKind, string> = {
+  medkit: 'Аптечка',
+  crystal: 'Кристалл',
+  key: 'Ключ',
+  code: 'Код',
+  knife: 'Нож',
+  club: 'Дубина',
+  sabre: 'Сабля',
+  rifle: 'Ружье',
+};
+
+const ITEM_ICONS: Record<PickupKind, string> = {
+  medkit: '+',
+  crystal: '*',
+  key: 'K',
+  code: '#',
+  knife: '/',
+  club: '!',
+  sabre: 'S',
+  rifle: 'R',
+};
+
+const EVENT_LABELS: Record<EventKind, string> = {
+  ambush: 'Засада',
+  storm: 'Пыльная буря',
+  rage: 'Ярость зараженных',
+  starvation: 'Голодный час',
+};
+
+const EVENT_HINTS: Record<EventKind, string> = {
+  ambush: 'Из травы полезла новая волна. Двигайся и бей первым.',
+  storm: 'Буря режет скорость и видимость. Не стой на месте.',
+  rage: 'Враги ускорились и бьют больнее.',
+  starvation: 'Степь вытягивает силы. Найди аптечку быстрее.',
+};
+
+const FAKE_FORTRESSES: FakeFortress[] = [
+  { id: 1, x: -46, z: -72, triggered: false, message: 'Ха! Это сарай с башнями. Крепость бы тебя даже на порог не пустила.' },
+  { id: 2, x: 48, z: -178, triggered: false, message: 'Мимо, герой. Это декорация для тех, кто верит каждому камню.' },
+  { id: 3, x: -18, z: -260, triggered: false, message: 'Опять не та крепость. Степь смеется, а настоящая цель дальше на севере.' },
 ];
 
-function hash(n: number): number { const x = Math.sin(n * 127.1) * 43758.5453; return x - Math.floor(x); }
-
-// ── Ложные крепости и загадки ──
-const FAKE_FORTRESS_DEFS = [
-  { x: WORLD_W * 0.18, y: 7100, mockIdx: 0 },
-  { x: WORLD_W * 0.82, y: 5200, mockIdx: 1 },
-  { x: WORLD_W * 0.5,  y: 2800, mockIdx: 2 },
-] as const;
-
-const RIDDLE_DEFS = [
-  { x: WORLD_W * 0.3,  y: 6000, item: 'code_scroll' as ItemId },
-  { x: WORLD_W * 0.7,  y: 3800, item: 'lockpick'    as ItemId },
-] as const;
-
-const MOCK_MSGS = [
-  '😂 ХА-ХА! Думал это крепость? Ты клоун, Баха!',
-  '🤡 Ловушка! Это просто руины. Ищи настоящую!',
-  '💀 Серьёзно?! Ты дошёл сюда ради картонной стены?',
+const HOUSE_NPCS: HouseNpc[] = [
+  {
+    id: 1, name: 'Старый табиб', mood: 'good', x: -92, z: 42, visited: false,
+    title: 'Дом лекаря',
+    story: 'Табиб прячет в сундуке высушенные травы и клянется, что кумыс не просто напиток, а последняя защита крови.',
+    choices: [
+      { text: 'Попросить лечение', reply: 'Табиб быстро перевязал раны и дал кислый глоток кумыса.', effect: 'heal' },
+      { text: 'Попросить припасы', reply: 'Он сунул тебе аптечку: "На дороге не геройствуй".', effect: 'medkit' },
+    ],
+  },
+  {
+    id: 2, name: 'Кузнец Сырым', mood: 'good', x: 78, z: -38, visited: false,
+    title: 'Кузница у солончака',
+    story: 'Кузнец слышал вой волков еще до эпидемии. Он говорит, что железо помогает думать, когда голова не справляется.',
+    choices: [
+      { text: 'Взять оружие', reply: 'Сырым отдал саблю с затупленной, но честной гардой.', effect: 'weapon' },
+      { text: 'Спросить дорогу', reply: 'Он отмечает на земле короткий путь между руинами.', effect: 'story' },
+    ],
+  },
+  {
+    id: 3, name: 'Беглая знахарка', mood: 'good', x: -112, z: -214, visited: false,
+    title: 'Юрта у камышей',
+    story: 'Знахарка уверена: вирус пришел не от волков, а через старый караван. Волки только первыми сорвались с цепи.',
+    choices: [
+      { text: 'Выпить настой', reply: 'Настой горький, но силы возвращаются.', effect: 'heal' },
+      { text: 'Взять аптечку', reply: 'Она молча дает перевязочный набор.', effect: 'medkit' },
+    ],
+  },
+  {
+    id: 4, name: 'Пастух Кайрат', mood: 'neutral', x: 108, z: -150, visited: false,
+    title: 'Пустой загон',
+    story: 'Кайрат видел, как волчья стая вошла в аул без страха перед огнем. После этого люди начали забывать свои имена.',
+    choices: [
+      { text: 'Выслушать историю', reply: 'Он рассказывает про первую ночь заражения. Теперь ты лучше понимаешь степь.', effect: 'story' },
+      { text: 'Спросить про крепость', reply: 'Кайрат говорит: "Не верь первой башне. Настоящая крепость молчит".', effect: 'story' },
+    ],
+  },
+  {
+    id: 5, name: 'Сказительница Айша', mood: 'neutral', x: -70, z: -330, visited: false,
+    title: 'Дом с красной дверью',
+    story: 'Айша собирает имена пропавших. Она говорит, что мир держится на тех, кто помнит даже смешных и глупых.',
+    choices: [
+      { text: 'Послушать песню', reply: 'Песня не лечит раны, но возвращает смысл идти дальше.', effect: 'story' },
+      { text: 'Спросить про кумыс', reply: 'Айша смеется: "Ваш иммунитет, похоже, родился из упрямства и кислого молока".', effect: 'story' },
+    ],
+  },
+  {
+    id: 6, name: 'Писарь Нурлан', mood: 'neutral', x: 96, z: -424, visited: false,
+    title: 'Архивная изба',
+    story: 'Писарь хранит листы с печатями крепости. Он видел похожий код, но боится читать его вслух.',
+    choices: [
+      { text: 'Попросить запись', reply: 'Нурлан показывает старый знак на воротах. Это может пригодиться.', effect: 'story' },
+      { text: 'Пошутить про конец света', reply: 'Он записывает шутку как исторический документ.', effect: 'story' },
+    ],
+  },
+  {
+    id: 7, name: 'Молчаливый охотник', mood: 'neutral', x: -118, z: -548, visited: false,
+    title: 'Охотничий дом',
+    story: 'Охотник говорит редко. По его зарубкам ясно: волки шли не стаей, а будто по чьей-то команде.',
+    choices: [
+      { text: 'Изучить зарубки', reply: 'Ты понимаешь, где чаще появляются зараженные.', effect: 'story' },
+      { text: 'Поблагодарить', reply: 'Охотник кивает. Это почти речь.', effect: 'story' },
+    ],
+  },
+  {
+    id: 8, name: 'Купец Жанат', mood: 'evil', x: 118, z: 20, visited: false,
+    title: 'Лавка без товара',
+    story: 'Купец улыбается слишком широко. В его доме чисто, но у порога свежие следы когтей.',
+    choices: [
+      { text: 'Купить подсказку', reply: 'Он забирает припасы и дает ложное направление.', effect: 'steal' },
+      { text: 'Пригрозить', reply: 'Жанат свистит в щель. Снаружи кто-то отвечает рычанием.', effect: 'ambush' },
+    ],
+  },
+  {
+    id: 9, name: 'Лже-табиб', mood: 'evil', x: -35, z: -402, visited: false,
+    title: 'Темная мазанка',
+    story: 'Он говорит медицинскими словами, но пахнет не травами, а ржавчиной и страхом.',
+    choices: [
+      { text: 'Выпить лекарство', reply: 'Это яд. Не смертельный, но очень неприятный.', effect: 'damage' },
+      { text: 'Обыскать дом', reply: 'Ты находишь аптечку, но шум зовет зараженных.', effect: 'ambush' },
+    ],
+  },
+  {
+    id: 10, name: 'Проводник без имени', mood: 'evil', x: 52, z: -590, visited: false,
+    title: 'Дом у оврага',
+    story: 'Проводник обещает короткую дорогу к крепости. Он слишком внимательно смотрит на твой инвентарь.',
+    choices: [
+      { text: 'Довериться', reply: 'Он уводит тебя к опасной тропе и исчезает.', effect: 'ambush' },
+      { text: 'Отказаться', reply: 'Он злится и успевает ударить ножом по руке.', effect: 'damage' },
+    ],
+  },
 ];
 
-const RIDDLES = [
-  {
-    question: 'Я иду, но ног нет. Я живу — пока ем, умираю — когда пью. Что я?',
-    options: ['🔥 Огонь', '💨 Ветер', '💧 Вода', '⌛ Время'],
-    correct: 0,
-    reward: 'code_scroll' as ItemId,
-    rewardText: '📜 Получен КОД К ВОРОТАМ! Почти у цели...',
-    wrongText: '❌ Неверно! Дух загадки ударяет тебя — −20 HP',
-  },
-  {
-    question: 'Чем больше берёшь — тем больше становится. Нельзя купить, можно потерять. Что это?',
-    options: ['🕳️ Яма', '💰 Деньги', '📋 Долг', '🌑 Тень'],
-    correct: 0,
-    reward: 'lockpick' as ItemId,
-    rewardText: '🗝️ Получена ОТМЫЧКА! Теперь ты готов.',
-    wrongText: '❌ Неверно! Проклятие загадки — −20 HP',
-  },
-] as const;
-
-// ── Инвентарь ──
-function addItem(w: World, item: ItemId, count = 1): boolean {
-  const meta = ITEMS[item];
-  if (meta.stackable) {
-    const i = w.inv.findIndex((s) => s && s.item === item);
-    if (i >= 0) { w.inv[i]!.count += count; return true; }
-  }
-  const e = w.inv.findIndex((s) => s === null);
-  if (e < 0) return false;
-  w.inv[e] = { item, count: meta.stackable ? count : 1 };
-  return true;
-}
-function removeOne(w: World, item: ItemId): boolean {
-  const i = w.inv.findIndex((s) => s && s.item === item);
-  if (i < 0) return false;
-  w.inv[i]!.count -= 1;
-  if (w.inv[i]!.count <= 0) { if (w.equipped === i) w.equipped = null; w.inv[i] = null; }
-  return true;
-}
-function countItem(w: World, item: ItemId): number {
-  return w.inv.reduce((a, s) => a + (s && s.item === item ? s.count : 0), 0);
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
 }
 
-function makeWorld(char: CharacterId): World {
-  const maxHp = char === 'erlan' ? 130 : 100;
-  const w: World = {
-    char, px: WORLD_W / 2, py: WORLD_H - 200, pvx: 0, pvy: 0,
-    hp: maxHp, maxHp, aim: -Math.PI / 2, facing: -Math.PI / 2,
-    sneaking: false, torch: false,
-    enemies: [], allies: [], allyTimer: 14, loot: [], bullets: [],
-    inv: Array(9).fill(null), equipped: null,
-    time: 0.15, day: 1, kills: 0,
-    attackTimer: 0, attackCd: 0, wantsAttack: false, spawnTimer: 0,
-    hurtFlash: 0, result: '', banner: '', bannerT: 0,
-    nearRiddle: -1, riddleSolved: [false, false], fakeFortressMock: 0, fortressKeyLoot: null,
-    playTime: 0, eventId: 0, eventTimer: 0, nextEventIn: 60, eventCount: 0,
-    frozenTimer: 0, berserkMult: 1, tunnelChaser: null,
+function randomRange(min: number, max: number) {
+  return min + Math.random() * (max - min);
+}
+
+function lerpAngle(current: number, target: number, t: number) {
+  const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  return current + delta * clamp(t, 0, 1);
+}
+
+function randomQuestPoint(): QuestItem {
+  return {
+    x: randomRange(-WORLD_HALF + 18, WORLD_HALF - 18),
+    z: randomRange(FINISH_Z + 62, START_Z - 75),
+    collected: false,
   };
-  addItem(w, 'knife'); addItem(w, 'food', 2); addItem(w, 'cloth', 2);
-  w.equipped = 0;
-  // разбросать стартовый лут впереди
-  for (let i = 0; i < 60; i++) {
-    w.loot.push({ x: 120 + hash(i * 3.1) * (WORLD_W - 240), y: 200 + hash(i * 7.7) * (WORLD_H - 500), item: LOOT_TABLE[Math.floor(hash(i * 2.3) * LOOT_TABLE.length)], r: 12 });
-  }
-  banner(w, `${CHARACTERS[char].name}: на север, к крепости! 🧭`);
-  return w;
 }
 
-function banner(w: World, text: string) { w.banner = text; w.bannerT = 3.2; }
+function makeEnemy() {
+  const group = new THREE.Group();
+  const walkParts: { part: THREE.Object3D; side: number; baseX: number; baseZ: number }[] = [];
+  const deadSkin = new THREE.MeshStandardMaterial({ color: 0x9b9d7a, roughness: 0.92 });
+  const shirt = new THREE.MeshStandardMaterial({ color: 0x3e4c38, roughness: 0.95 });
+  const pants = new THREE.MeshStandardMaterial({ color: 0x2b2d2f, roughness: 0.9 });
+  const bone = new THREE.MeshStandardMaterial({ color: 0xd8c9a8, roughness: 0.72 });
+  const blood = new THREE.MeshStandardMaterial({ color: 0x5c1210, roughness: 0.88 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x15100d, roughness: 0.9 });
 
-// ════════════════════════════ JUMPSCARE SOUND ════════════════════════════
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.58, 1.55, 6, 14),
+    shirt,
+  );
+  body.position.y = 1.42;
+  body.rotation.x = -0.18;
+  body.scale.set(0.92, 1.04, 0.72);
+  body.castShadow = true;
+  group.add(body);
+
+  const chestTear = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.58, 0.04), blood);
+  chestTear.position.set(0.16, 1.5, -0.49);
+  chestTear.rotation.z = -0.18;
+  group.add(chestTear);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 14), deadSkin);
+  head.position.set(0.02, 2.58, -0.26);
+  head.scale.set(0.92, 1.12, 0.86);
+  head.rotation.z = -0.22;
+  head.castShadow = true;
+  group.add(head);
+
+  const hair = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.5, 4, 7), dark);
+  hair.position.set(-0.12, 2.92, -0.18);
+  hair.rotation.z = 0.65;
+  hair.castShadow = true;
+  group.add(hair);
+
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xf1f6c9 });
+  const eyeGeo = new THREE.SphereGeometry(0.045, 8, 8);
+  const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+  const rightEye = leftEye.clone();
+  leftEye.position.set(-0.13, 2.63, -0.63);
+  rightEye.position.set(0.17, 2.62, -0.63);
+  group.add(leftEye, rightEye);
+
+  const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, 0.04), blood);
+  cheek.position.set(0.22, 2.48, -0.62);
+  cheek.rotation.z = 0.25;
+  group.add(cheek);
+
+  const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.11, 0.16), dark);
+  jaw.position.set(0.04, 2.36, -0.62);
+  jaw.rotation.z = -0.12;
+  group.add(jaw);
+
+  for (const side of [-1, 1]) {
+    const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.48, 4, 8), shirt);
+    sleeve.position.set(side * 0.58, 1.8, -0.12);
+    sleeve.rotation.z = side * 0.45;
+    sleeve.rotation.x = -0.22;
+    sleeve.castShadow = true;
+    group.add(sleeve);
+    walkParts.push({ part: sleeve, side, baseX: sleeve.rotation.x, baseZ: sleeve.rotation.z });
+
+    const forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.105, 0.76, 4, 8), deadSkin);
+    forearm.position.set(side * 0.9, 1.32, -0.52);
+    forearm.rotation.z = side * 0.28;
+    forearm.rotation.x = -1.02;
+    forearm.castShadow = true;
+    group.add(forearm);
+    walkParts.push({ part: forearm, side, baseX: forearm.rotation.x, baseZ: forearm.rotation.z });
+
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), deadSkin);
+    hand.position.set(side * 1.02, 1.08, -0.88);
+    hand.scale.set(0.8, 0.58, 1.15);
+    hand.castShadow = true;
+    group.add(hand);
+
+    for (let i = 0; i < 3; i++) {
+      const finger = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.28, 5), bone);
+      finger.position.set(side * (1.0 + i * 0.045), 1.0, -1.02);
+      finger.rotation.x = Math.PI / 2;
+      finger.castShadow = true;
+      group.add(finger);
+    }
+
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.78, 4, 8), pants);
+    thigh.position.set(side * 0.26, 0.78, 0.03);
+    thigh.rotation.x = side > 0 ? -0.18 : 0.24;
+    thigh.castShadow = true;
+    group.add(thigh);
+    walkParts.push({ part: thigh, side, baseX: thigh.rotation.x, baseZ: thigh.rotation.z });
+
+    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.7, 4, 8), pants);
+    shin.position.set(side * 0.28, 0.24, side > 0 ? -0.16 : 0.16);
+    shin.rotation.x = side > 0 ? 0.38 : -0.24;
+    shin.castShadow = true;
+    group.add(shin);
+    walkParts.push({ part: shin, side, baseX: shin.rotation.x, baseZ: shin.rotation.z });
+
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.5), dark);
+    shoe.position.set(side * 0.28, 0.03, -0.22);
+    shoe.castShadow = true;
+    group.add(shoe);
+  }
+
+  const rag = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.08, 0.04), bone);
+  rag.position.set(-0.22, 1.08, -0.51);
+  rag.rotation.z = 0.8;
+  group.add(rag);
+
+  group.rotation.z = randomRange(-0.08, 0.08);
+  group.userData.walkParts = walkParts;
+  group.userData.phase = randomRange(0, Math.PI * 2);
+  group.userData.baseRotZ = group.rotation.z;
+
+  return group;
+}
+
+function makePickup(kind: PickupKind) {
+  const group = new THREE.Group();
+  const metal = new THREE.MeshStandardMaterial({ color: 0xd8dde4, metalness: 0.45, roughness: 0.28 });
+  const darkMetal = new THREE.MeshStandardMaterial({ color: 0x252422, metalness: 0.32, roughness: 0.42 });
+  const leather = new THREE.MeshStandardMaterial({ color: 0x4a2f22, roughness: 0.82 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6a4428, roughness: 0.8 });
+
+  if (kind === 'medkit') {
+    const bag = new THREE.Mesh(new THREE.BoxGeometry(1.28, 0.68, 0.95), new THREE.MeshStandardMaterial({ color: 0xf0eee8, roughness: 0.55 }));
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.1, 1.0), new THREE.MeshStandardMaterial({ color: 0xc9c6bd, roughness: 0.58 }));
+    const crossA = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, 0.58), new THREE.MeshStandardMaterial({ color: 0xb92828, roughness: 0.5 }));
+    const crossB = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.08, 0.18), new THREE.MeshStandardMaterial({ color: 0xb92828, roughness: 0.5 }));
+    lid.position.y = 0.39;
+    crossA.position.set(0, 0.46, -0.48);
+    crossB.position.set(0, 0.46, -0.48);
+    group.add(bag, lid, crossA, crossB);
+  } else if (kind === 'crystal') {
+    const core = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.72, 1),
+      new THREE.MeshStandardMaterial({ color: 0x54d6ff, emissive: 0x0a5266, emissiveIntensity: 0.55, roughness: 0.28 }),
+    );
+    const shard = new THREE.Mesh(
+      new THREE.ConeGeometry(0.18, 0.65, 5),
+      new THREE.MeshStandardMaterial({ color: 0xb6f2ff, emissive: 0x1a6c82, emissiveIntensity: 0.38, roughness: 0.25 }),
+    );
+    shard.position.set(0.42, 0.12, 0.05);
+    shard.rotation.z = -0.45;
+    group.add(core, shard);
+  } else if (kind === 'key') {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.07, 10, 24), new THREE.MeshStandardMaterial({ color: 0xffd34d, metalness: 0.55, roughness: 0.24, emissive: 0x3d2a00, emissiveIntensity: 0.2 }));
+    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.88), ring.material);
+    const toothA = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.11, 0.16), ring.material);
+    const toothB = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.11, 0.16), ring.material);
+    stem.position.z = -0.62;
+    toothA.position.set(0.14, 0, -1.04);
+    toothB.position.set(-0.1, 0, -0.86);
+    group.add(ring, stem, toothA, toothB);
+  } else if (kind === 'code') {
+    const scroll = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.06, 0.86), new THREE.MeshStandardMaterial({ color: 0xf2e5b8, roughness: 0.75 }));
+    const seal = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.08, 14), new THREE.MeshStandardMaterial({ color: 0x9f1f20, roughness: 0.5 }));
+    const lineA = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.02, 0.035), darkMetal);
+    const lineB = lineA.clone();
+    seal.position.set(0.36, 0.07, -0.18);
+    lineA.position.set(-0.18, 0.08, -0.12);
+    lineB.position.set(-0.12, 0.08, 0.12);
+    group.add(scroll, seal, lineA, lineB);
+  } else if (kind === 'rifle') {
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.28, 0.82), wood);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 2.1, 12), darkMetal);
+    const trigger = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.025, 8, 14), darkMetal);
+    stock.position.z = 0.58;
+    barrel.position.z = -0.5;
+    barrel.rotation.x = Math.PI / 2;
+    trigger.position.set(0, -0.24, 0.18);
+    group.add(stock, barrel, trigger);
+  } else if (kind === 'sabre') {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 1.85), metal);
+    const guard = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 8, 18), metal);
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.42, 10), leather);
+    blade.position.z = -0.45;
+    guard.rotation.x = Math.PI / 2;
+    grip.position.z = 0.7;
+    grip.rotation.x = Math.PI / 2;
+    group.add(blade, guard, grip);
+  } else if (kind === 'club') {
+    const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 1.25, 5, 10), wood);
+    const head = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.52, 5, 10), new THREE.MeshStandardMaterial({ color: 0x5a3520, roughness: 0.88 }));
+    handle.rotation.x = Math.PI / 2;
+    head.rotation.x = Math.PI / 2;
+    head.position.z = -0.72;
+    group.add(handle, head);
+  } else {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.92), metal);
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.42, 10), leather);
+    blade.position.z = -0.26;
+    grip.position.z = 0.48;
+    grip.rotation.x = Math.PI / 2;
+    group.add(blade, grip);
+  }
+
+  group.traverse((part) => {
+    if (part instanceof THREE.Mesh) part.castShadow = true;
+  });
+  group.position.y = kind === 'code' ? 0.14 : kind === 'medkit' ? 0.52 : 0.82;
+  if (kind === 'rifle' || kind === 'sabre' || kind === 'knife' || kind === 'club' || kind === 'key') group.rotation.x = Math.PI / 2;
+  return group;
+}
+
+function makeFortress(x: number, z: number, fake = false) {
+  const fortress = new THREE.Group();
+  const stone = new THREE.MeshStandardMaterial({ color: fake ? 0x8a735f : 0x7f8178, roughness: 0.9 });
+  const dark = new THREE.MeshStandardMaterial({ color: fake ? 0x2a1711 : 0x17191f, roughness: 0.9 });
+
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(fake ? 26 : 38, fake ? 6 : 9, 4), stone);
+  wall.position.set(0, fake ? 3 : 4.5, 0);
+  wall.castShadow = true;
+  wall.receiveShadow = true;
+  fortress.add(wall);
+
+  for (const towerX of [fake ? -13 : -19, fake ? 13 : 19]) {
+    const tower = new THREE.Mesh(
+      new THREE.CylinderGeometry(fake ? 2.4 : 3.4, fake ? 3 : 4, fake ? 9 : 13, 12),
+      stone,
+    );
+    tower.position.set(towerX, fake ? 4.5 : 6.5, 0);
+    tower.castShadow = true;
+    tower.receiveShadow = true;
+    fortress.add(tower);
+  }
+
+  const gate = new THREE.Mesh(new THREE.BoxGeometry(fake ? 5 : 7, fake ? 4 : 6, 4.2), dark);
+  gate.position.set(0, fake ? 2 : 3, 2.2);
+  fortress.add(gate);
+
+  if (fake) {
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(7, 0.55, 0.4),
+      new THREE.MeshStandardMaterial({ color: 0x3b2119, roughness: 0.8 }),
+    );
+    sign.position.set(0, 6.7, 2.8);
+    fortress.add(sign);
+  }
+
+  fortress.position.set(x, 0, z);
+  return fortress;
+}
+
+function makeRockCluster() {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x77746a, roughness: 0.96 });
+  const count = 3 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < count; i++) {
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(randomRange(0.35, 1.1), 0), mat);
+    rock.position.set(randomRange(-1.4, 1.4), randomRange(0.18, 0.45), randomRange(-1.1, 1.1));
+    rock.scale.set(randomRange(1.0, 1.8), randomRange(0.45, 0.95), randomRange(0.8, 1.4));
+    rock.rotation.set(randomRange(0, 1.2), randomRange(0, Math.PI), randomRange(0, 0.8));
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+    group.add(rock);
+  }
+  return group;
+}
+
+function makeDryTree() {
+  const group = new THREE.Group();
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a4634, roughness: 0.94 });
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.27, 3.2, 7), trunkMat);
+  trunk.position.y = 1.6;
+  trunk.rotation.z = randomRange(-0.18, 0.18);
+  trunk.castShadow = true;
+  group.add(trunk);
+
+  for (const side of [-1, 1]) {
+    const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.11, 1.65, 6), trunkMat);
+    branch.position.set(side * 0.46, 2.65, 0);
+    branch.rotation.z = side * 0.82;
+    branch.rotation.x = randomRange(-0.25, 0.25);
+    branch.castShadow = true;
+    group.add(branch);
+  }
+  return group;
+}
+
+function makeForestTree() {
+  const group = new THREE.Group();
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4d3425, roughness: 0.92 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2f6b3f, roughness: 0.88 });
+  const darkLeafMat = new THREE.MeshStandardMaterial({ color: 0x244f34, roughness: 0.9 });
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.32, 3.4, 8), trunkMat);
+  trunk.position.y = 1.7;
+  trunk.castShadow = true;
+  group.add(trunk);
+
+  for (let i = 0; i < 3; i++) {
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(1.25 - i * 0.18, 1.65, 9), i % 2 === 0 ? leafMat : darkLeafMat);
+    crown.position.y = 2.75 + i * 0.72;
+    crown.castShadow = true;
+    group.add(crown);
+  }
+  return group;
+}
+
+function makeMountain() {
+  const group = new THREE.Group();
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x6f746f, roughness: 0.98, flatShading: true });
+  const snowMat = new THREE.MeshStandardMaterial({ color: 0xd9e5e2, roughness: 0.82, flatShading: true });
+  const height = randomRange(9, 18);
+  const base = randomRange(7, 14);
+  const peak = new THREE.Mesh(new THREE.ConeGeometry(base, height, 6), rockMat);
+  peak.position.y = height / 2;
+  peak.rotation.y = randomRange(0, Math.PI);
+  peak.castShadow = true;
+  peak.receiveShadow = true;
+  group.add(peak);
+
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(base * 0.34, height * 0.24, 6), snowMat);
+  cap.position.y = height * 0.88;
+  cap.rotation.y = peak.rotation.y;
+  cap.castShadow = true;
+  group.add(cap);
+
+  for (let i = 0; i < 3; i++) {
+    const shoulder = new THREE.Mesh(new THREE.ConeGeometry(base * randomRange(0.35, 0.62), height * randomRange(0.35, 0.58), 5), rockMat);
+    shoulder.position.set(randomRange(-base * 0.52, base * 0.52), shoulder.geometry.parameters.height / 2, randomRange(-base * 0.52, base * 0.52));
+    shoulder.rotation.y = randomRange(0, Math.PI);
+    shoulder.castShadow = true;
+    shoulder.receiveShadow = true;
+    group.add(shoulder);
+  }
+  return group;
+}
+
+function makeRiverSegment(size: number) {
+  const group = new THREE.Group();
+  const water = new THREE.Mesh(
+    new THREE.PlaneGeometry(size * 1.16, 18, 8, 2),
+    makeWaterShaderMaterial(),
+  );
+  water.userData.shader = 'water';
+  water.rotation.x = -Math.PI / 2;
+  water.position.y = 0.045;
+  water.rotation.z = randomRange(-0.24, 0.24);
+  group.add(water);
+
+  const shoreMat = new THREE.MeshStandardMaterial({ color: 0x827852, roughness: 0.98 });
+  for (const side of [-1, 1]) {
+    const shore = new THREE.Mesh(new THREE.PlaneGeometry(size * 1.12, 3.2), shoreMat);
+    shore.rotation.x = -Math.PI / 2;
+    shore.rotation.z = water.rotation.z;
+    shore.position.set(0, 0.052, side * 10.5);
+    group.add(shore);
+  }
+  return group;
+}
+
+function makeGroundShaderMaterial(seed = 0) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uSeed: { value: seed },
+      uFogNear: { value: 95 },
+      uFogFar: { value: 340 },
+      uFogColor: { value: new THREE.Color(0x9fb7c9) },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vWorld;
+      varying float vHeight;
+      uniform float uSeed;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        float ridge = sin((p.x + ${CHUNK_SIZE.toFixed(1)}) * 0.075 + uSeed) * 0.42 + cos(p.y * 0.06 - uSeed) * 0.38;
+        p.z += ridge;
+        vec4 world = modelMatrix * vec4(p, 1.0);
+        vWorld = world.xyz;
+        vHeight = ridge;
+        gl_Position = projectionMatrix * viewMatrix * world;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uSeed;
+      uniform float uFogNear;
+      uniform float uFogFar;
+      uniform vec3 uFogColor;
+      varying vec2 vUv;
+      varying vec3 vWorld;
+      varying float vHeight;
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7)) + uSeed) * 43758.5453);
+      }
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        float a = hash(i);
+        float b = hash(i + vec2(1.0, 0.0));
+        float c = hash(i + vec2(0.0, 1.0));
+        float d = hash(i + vec2(1.0, 1.0));
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+      }
+      void main() {
+        float n = noise(vWorld.xz * 0.055);
+        float fine = noise(vWorld.xz * 0.22 + uTime * 0.015);
+        vec3 grass = vec3(0.29, 0.42, 0.22);
+        vec3 dry = vec3(0.56, 0.49, 0.30);
+        vec3 damp = vec3(0.18, 0.28, 0.22);
+        vec3 rock = vec3(0.38, 0.39, 0.34);
+        vec3 color = mix(dry, grass, smoothstep(0.22, 0.78, n));
+        color = mix(color, damp, smoothstep(0.72, 0.95, fine) * 0.38);
+        color = mix(color, rock, smoothstep(0.58, 1.05, abs(vHeight)));
+        float light = 0.78 + 0.22 * smoothstep(-0.35, 0.55, vHeight);
+        color *= light;
+        float dist = length(cameraPosition.xz - vWorld.xz);
+        float fog = smoothstep(uFogNear, uFogFar, dist);
+        gl_FragColor = vec4(mix(color, uFogColor, fog * 0.72), 1.0);
+      }
+    `,
+  });
+}
+
+function makeWaterShaderMaterial() {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    uniforms: {
+      uTime: { value: 0 },
+      uFogColor: { value: new THREE.Color(0x9fb7c9) },
+    },
+    vertexShader: `
+      uniform float uTime;
+      varying vec2 vUv;
+      varying vec3 vWorld;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        p.z += sin(p.x * 0.18 + uTime * 1.8) * 0.16 + cos(p.y * 0.35 + uTime * 1.2) * 0.08;
+        vec4 world = modelMatrix * vec4(p, 1.0);
+        vWorld = world.xyz;
+        gl_Position = projectionMatrix * viewMatrix * world;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform vec3 uFogColor;
+      varying vec2 vUv;
+      varying vec3 vWorld;
+      void main() {
+        float ripple = sin(vUv.x * 42.0 + uTime * 3.4) * 0.5 + sin((vUv.x + vUv.y) * 24.0 - uTime * 2.2) * 0.5;
+        float shine = smoothstep(0.68, 0.98, ripple);
+        vec3 deep = vec3(0.08, 0.32, 0.38);
+        vec3 shallow = vec3(0.18, 0.56, 0.65);
+        vec3 color = mix(deep, shallow, vUv.y);
+        color += shine * vec3(0.45, 0.72, 0.78);
+        float dist = length(cameraPosition.xz - vWorld.xz);
+        float fog = smoothstep(120.0, 360.0, dist);
+        gl_FragColor = vec4(mix(color, uFogColor, fog * 0.52), 0.78);
+      }
+    `,
+  });
+}
+
+function makeSkyDome() {
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(520, 32, 16),
+    new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: {
+        uTop: { value: new THREE.Color(0x5f8aa8) },
+        uHorizon: { value: new THREE.Color(0xd8c89b) },
+        uNight: { value: new THREE.Color(0x16252f) },
+        uMix: { value: 0 },
+      },
+      vertexShader: `
+        varying vec3 vWorld;
+        void main() {
+          vec4 world = modelMatrix * vec4(position, 1.0);
+          vWorld = normalize(world.xyz);
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uTop;
+        uniform vec3 uHorizon;
+        uniform vec3 uNight;
+        uniform float uMix;
+        varying vec3 vWorld;
+        void main() {
+          float h = smoothstep(-0.08, 0.72, vWorld.y);
+          vec3 day = mix(uHorizon, uTop, h);
+          vec3 col = mix(day, uNight, uMix);
+          float sun = pow(max(dot(vWorld, normalize(vec3(-0.35, 0.82, 0.28))), 0.0), 180.0);
+          col += sun * vec3(1.0, 0.72, 0.38);
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    }),
+  );
+  sky.frustumCulled = false;
+  return sky;
+}
+
+function makeRuin() {
+  const group = new THREE.Group();
+  const stone = new THREE.MeshStandardMaterial({ color: 0x817a6d, roughness: 0.98 });
+  for (let i = 0; i < 6; i++) {
+    const block = new THREE.Mesh(new THREE.BoxGeometry(randomRange(1.0, 2.2), randomRange(0.5, 1.6), randomRange(0.55, 1.1)), stone);
+    block.position.set(randomRange(-3.2, 3.2), block.geometry.parameters.height / 2, randomRange(-1.8, 1.8));
+    block.rotation.y = randomRange(-0.45, 0.45);
+    block.castShadow = true;
+    block.receiveShadow = true;
+    group.add(block);
+  }
+  return group;
+}
+
+function makeCampDebris() {
+  const group = new THREE.Group();
+  const ash = new THREE.MeshStandardMaterial({ color: 0x2a2926, roughness: 0.9 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x593821, roughness: 0.88 });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.08, 8, 22), ash);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.06;
+  group.add(ring);
+
+  for (let i = 0; i < 4; i++) {
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.4, 7), wood);
+    log.position.y = 0.15;
+    log.rotation.set(Math.PI / 2, 0, (Math.PI / 4) * i);
+    log.castShadow = true;
+    group.add(log);
+  }
+  return group;
+}
+
+function makeHouse(mood: NpcMood) {
+  const group = new THREE.Group();
+  const wallColor = mood === 'good' ? 0x6f7f63 : mood === 'evil' ? 0x4f3a35 : 0x746957;
+  const wall = new THREE.Mesh(
+    new THREE.BoxGeometry(8, 4.2, 7),
+    new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.9 }),
+  );
+  wall.position.y = 2.1;
+  wall.castShadow = true;
+  wall.receiveShadow = true;
+
+  const roof = new THREE.Mesh(
+    new THREE.ConeGeometry(6.2, 3, 4),
+    new THREE.MeshStandardMaterial({ color: mood === 'evil' ? 0x2b1715 : 0x3f2b1f, roughness: 0.85 }),
+  );
+  roof.position.y = 5.3;
+  roof.rotation.y = Math.PI / 4;
+  roof.castShadow = true;
+
+  const door = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 2.4, 0.18),
+    new THREE.MeshStandardMaterial({ color: 0x24160f, roughness: 0.8 }),
+  );
+  door.position.set(0, 1.2, -3.6);
+
+  const windowMat = new THREE.MeshBasicMaterial({ color: mood === 'evil' ? 0x9a332d : 0xf0c66a });
+  const windowA = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.75, 0.12), windowMat);
+  const windowB = windowA.clone();
+  windowA.position.set(-2.4, 2.35, -3.64);
+  windowB.position.set(2.4, 2.35, -3.64);
+
+  group.add(wall, roof, door, windowA, windowB);
+  return group;
+}
+
+function makeNpcFigure(mood: NpcMood) {
+  const group = new THREE.Group();
+  const cloth = new THREE.MeshStandardMaterial({
+    color: mood === 'good' ? 0x3f7d55 : mood === 'evil' ? 0x6b2822 : 0x5f6571,
+    roughness: 0.8,
+  });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xc99666, roughness: 0.7 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 1.2, 6, 12), cloth);
+  body.position.y = 1.25;
+  body.castShadow = true;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), skin);
+  head.position.y = 2.18;
+  head.castShadow = true;
+  group.add(body, head);
+  return group;
+}
+
+function placeScenery(scene: THREE.Scene, object: THREE.Object3D, x: number, z: number, scale = 1) {
+  object.position.set(x, 0, z);
+  object.rotation.y = randomRange(0, Math.PI * 2);
+  object.scale.setScalar(scale);
+  scene.add(object);
+}
+
+function hash2(x: number, z: number, salt = 0) {
+  const n = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453123;
+  return n - Math.floor(n);
+}
+
+function chunkRandom(cx: number, cz: number, salt: number, min: number, max: number) {
+  return min + hash2(cx, cz, salt) * (max - min);
+}
+
+function terrainHeightAt(x: number, z: number) {
+  const broad = Math.sin(x * 0.035) * 0.34 + Math.cos(z * 0.028) * 0.28;
+  const detail = Math.sin((x + z) * 0.08) * 0.08 + Math.cos((x - z) * 0.05) * 0.06;
+  return Math.max(-0.06, broad + detail) * 0.34;
+}
+
+function resolvePlayerPhysics(position: THREE.Vector3, velocity: THREE.Vector3, obstacles: PhysicsObstacle[]) {
+  let waterDrag = 1;
+  for (const obstacle of obstacles) {
+    const dx = position.x - obstacle.x;
+    const dz = position.z - obstacle.z;
+    const dist = Math.hypot(dx, dz);
+    if (obstacle.kind === 'water') {
+      if (dist < obstacle.radius) waterDrag = Math.min(waterDrag, 0.54);
+      continue;
+    }
+
+    const minDist = PLAYER_RADIUS + obstacle.radius;
+    if (dist > 0.001 && dist < minDist) {
+      const push = minDist - dist;
+      const nx = dx / dist;
+      const nz = dz / dist;
+      position.x += nx * push;
+      position.z += nz * push;
+      const intoObstacle = velocity.x * nx + velocity.z * nz;
+      if (intoObstacle < 0) {
+        velocity.x -= nx * intoObstacle * 1.08;
+        velocity.z -= nz * intoObstacle * 1.08;
+      }
+    }
+  }
+  return waterDrag;
+}
+
+function makeWorldChunk(cx: number, cz: number) {
+  const group = new THREE.Group();
+  group.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
+  const obstacles: Omit<PhysicsObstacle, 'key'>[] = [];
+
+  const seed = hash2(cx, cz, 9) * 1000;
+  const terrainRoll = hash2(cx, cz, 1);
+  const groundColor = terrainRoll > 0.72 ? 0x59633d : terrainRoll > 0.44 ? 0x6f7d48 : 0x7f884d;
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(CHUNK_SIZE + 2, CHUNK_SIZE + 2, 8, 8),
+    makeGroundShaderMaterial(seed + groundColor * 0.000001),
+  );
+  ground.userData.shader = 'ground';
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = 0.006;
+  ground.receiveShadow = true;
+  group.add(ground);
+
+  const riverBand = Math.abs(Math.sin(cx * 0.62 + cz * 0.38)) < 0.18;
+  if (riverBand) {
+    const river = makeRiverSegment(CHUNK_SIZE);
+    river.rotation.y = Math.sin((cx + cz) * 0.7) * 0.65;
+    group.add(river);
+    obstacles.push({ x: 0, z: 0, radius: CHUNK_SIZE * 0.54, kind: 'water' });
+  }
+
+  if (terrainRoll > 0.76) {
+    const count = 2 + Math.floor(hash2(cx, cz, 3) * 3);
+    for (let i = 0; i < count; i++) {
+      const mountain = makeMountain();
+      mountain.position.set(chunkRandom(cx, cz, i + 10, -32, 32), 0, chunkRandom(cx, cz, i + 20, -32, 32));
+      const scale = chunkRandom(cx, cz, i + 30, 0.7, 1.45);
+      mountain.scale.setScalar(scale);
+      obstacles.push({ x: mountain.position.x, z: mountain.position.z, radius: 4.8 * scale, kind: 'solid' });
+      group.add(mountain);
+    }
+  } else if (terrainRoll > 0.38) {
+    const count = 11 + Math.floor(hash2(cx, cz, 4) * 18);
+    for (let i = 0; i < count; i++) {
+      const tree = makeForestTree();
+      tree.position.set(chunkRandom(cx, cz, i + 40, -40, 40), 0, chunkRandom(cx, cz, i + 90, -40, 40));
+      tree.rotation.y = chunkRandom(cx, cz, i + 140, 0, Math.PI * 2);
+      const scale = chunkRandom(cx, cz, i + 180, 0.72, 1.38);
+      tree.scale.setScalar(scale);
+      obstacles.push({ x: tree.position.x, z: tree.position.z, radius: 0.72 * scale, kind: 'solid' });
+      group.add(tree);
+    }
+  } else {
+    const count = 4 + Math.floor(hash2(cx, cz, 5) * 8);
+    for (let i = 0; i < count; i++) {
+      const rocks = makeRockCluster();
+      rocks.position.set(chunkRandom(cx, cz, i + 220, -40, 40), 0, chunkRandom(cx, cz, i + 260, -40, 40));
+      const scale = chunkRandom(cx, cz, i + 300, 0.6, 1.55);
+      rocks.scale.setScalar(scale);
+      obstacles.push({ x: rocks.position.x, z: rocks.position.z, radius: 1.8 * scale, kind: 'solid' });
+      group.add(rocks);
+    }
+  }
+
+  group.userData.obstacles = obstacles;
+  return group;
+}
+
+function questNav(player: THREE.Vector3, quest: QuestItem) {
+  const dx = quest.x - player.x;
+  const dz = quest.z - player.z;
+  const distance = Math.round(Math.hypot(dx, dz));
+  const angle = Math.atan2(dx, -dz) * (180 / Math.PI);
+  return { distance, angle };
+}
+
+function addInventoryItem(items: InventoryEntry[], kind: PickupKind) {
+  const existing = items.find((item) => item.kind === kind);
+  if (existing) existing.count += 1;
+  else if (items.length < 9) items.push({ kind, count: 1 });
+  return [...items];
+}
+
+function isWeapon(kind: PickupKind): kind is WeaponKind {
+  return kind === 'knife' || kind === 'club' || kind === 'sabre' || kind === 'rifle';
+}
+
+function storyScore(flags: StoryFlags) {
+  return flags.trust * 2 + flags.lore - flags.risk - flags.cruelty * 2;
+}
+
+function endingFor(flags: StoryFlags, difficulty: Difficulty, score: number) {
+  const thread = storyScore(flags);
+  if (thread >= 18 && flags.lore >= 9) {
+    return `Ending: Cure. The fortress opens, but you do not burn it. You use the old kumys culture and the northern records to turn the infection into a vaccine. Difficulty: ${DIFFICULTY[difficulty].label}. Score: ${score}.`;
+  }
+  if (flags.trust >= 7 && flags.risk < 8) {
+    return `Ending: Caravan. The fortress survives as a shelter. The people you helped arrive after sunrise and the steppe gets a second road north. Difficulty: ${DIFFICULTY[difficulty].label}. Score: ${score}.`;
+  }
+  if (flags.cruelty >= 5 || flags.risk >= 11) {
+    return `Ending: Ashes. You open the gates, but too many choices fed the fear inside the fortress. The source burns, and the cure burns with it. Difficulty: ${DIFFICULTY[difficulty].label}. Score: ${score}.`;
+  }
+  return `Ending: Silent Gate. You survive and seal the fortress for now. The infection is stopped here, but the steppe keeps some of its secrets. Difficulty: ${DIFFICULTY[difficulty].label}. Score: ${score}.`;
+}
+
+function dayPhaseAt(dayTime: number): DayPhase {
+  if (dayTime < 0.18) return 'dawn';
+  if (dayTime < 0.62) return 'day';
+  if (dayTime < 0.78) return 'dusk';
+  return 'night';
+}
+
+function dayPhaseLabel(phase: DayPhase) {
+  if (phase === 'dawn') return 'Dawn';
+  if (phase === 'day') return 'Day';
+  if (phase === 'dusk') return 'Dusk';
+  return 'Night';
+}
+
+function walkModeLabel(mode: WalkMode) {
+  if (mode === 'sneak') return 'Silent';
+  if (mode === 'sprint') return 'Sprint';
+  if (mode === 'tired') return 'Tired';
+  return 'Walk';
+}
+
+function createDynamicMusic() {
+  try {
+    const audio = new AudioContext();
+    const master = audio.createGain();
+    const drone = audio.createOscillator();
+    const pulse = audio.createOscillator();
+    const danger = audio.createOscillator();
+    const droneGain = audio.createGain();
+    const pulseGain = audio.createGain();
+    const dangerGain = audio.createGain();
+    const filter = audio.createBiquadFilter();
+
+    master.gain.value = 0.0001;
+    drone.type = 'sine';
+    pulse.type = 'triangle';
+    danger.type = 'sawtooth';
+    filter.type = 'lowpass';
+    filter.frequency.value = 720;
+    drone.frequency.value = 88;
+    pulse.frequency.value = 132;
+    danger.frequency.value = 55;
+    droneGain.gain.value = 0.035;
+    pulseGain.gain.value = 0.0001;
+    dangerGain.gain.value = 0.0001;
+
+    drone.connect(droneGain);
+    pulse.connect(pulseGain);
+    danger.connect(dangerGain);
+    droneGain.connect(filter);
+    pulseGain.connect(filter);
+    dangerGain.connect(filter);
+    filter.connect(master);
+    master.connect(audio.destination);
+    drone.start();
+    pulse.start();
+    danger.start();
+    master.gain.exponentialRampToValueAtTime(0.22, audio.currentTime + 1.2);
+
+    return {
+      update(dangerLevel: number, hp: number, eventActive: boolean, inHloddev: boolean) {
+        const now = audio.currentTime;
+        const tension = clamp(dangerLevel + (100 - hp) / 160 + (eventActive ? 0.35 : 0), 0, 1.4);
+        drone.frequency.setTargetAtTime(inHloddev ? 104 : 82 + tension * 18, now, 0.12);
+        pulse.frequency.setTargetAtTime(118 + tension * 92, now, 0.08);
+        danger.frequency.setTargetAtTime(42 + tension * 64, now, 0.08);
+        filter.frequency.setTargetAtTime(inHloddev ? 520 : 680 + tension * 420, now, 0.15);
+        pulseGain.gain.setTargetAtTime(0.012 + tension * 0.032, now, 0.08);
+        dangerGain.gain.setTargetAtTime(tension > 0.45 ? 0.018 + tension * 0.025 : 0.0001, now, 0.08);
+      },
+      stop() {
+        const now = audio.currentTime;
+        master.gain.setTargetAtTime(0.0001, now, 0.08);
+        setTimeout(() => {
+          drone.stop();
+          pulse.stop();
+          danger.stop();
+          audio.close().catch(() => {});
+        }, 500);
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function heldItemColor(kind: PickupKind) {
+  if (isWeapon(kind)) return WEAPONS[kind].color;
+  if (kind === 'medkit') return 0xf4f1e8;
+  if (kind === 'crystal') return 0x79e6ff;
+  if (kind === 'key') return 0xffc857;
+  return 0xd2b48c;
+}
+
+function heldItemScale(kind: PickupKind) {
+  if (kind === 'rifle') return { x: 1, y: 1, z: 1.55 };
+  if (kind === 'sabre') return { x: 0.72, y: 0.8, z: 1.25 };
+  if (kind === 'club') return { x: 1.15, y: 1.15, z: 1 };
+  if (kind === 'medkit') return { x: 2.5, y: 2.1, z: 0.34 };
+  if (kind === 'crystal') return { x: 1.4, y: 1.4, z: 0.52 };
+  if (kind === 'key') return { x: 1.1, y: 0.8, z: 0.62 };
+  if (kind === 'code') return { x: 2.2, y: 1.35, z: 0.24 };
+  return { x: 0.82, y: 0.82, z: 0.82 };
+}
+
 function playJumpscareSfx() {
   try {
-    const ac = new AudioContext();
-    const dur = 2.6;
-    const sr = ac.sampleRate;
-    // White noise burst
-    const buf = ac.createBuffer(1, Math.floor(sr * dur), sr);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    const noise = ac.createBufferSource();
-    noise.buffer = buf;
-    // Piercing band-pass filter
-    const flt = ac.createBiquadFilter();
-    flt.type = 'bandpass'; flt.frequency.value = 2800; flt.Q.value = 0.28;
-    // Screech oscillator on top
-    const osc = ac.createOscillator();
-    osc.type = 'sawtooth'; osc.frequency.value = 880;
-    osc.frequency.exponentialRampToValueAtTime(220, ac.currentTime + dur);
-    // Gain envelope — instant loud attack, decay
-    const gain = ac.createGain();
-    gain.gain.setValueAtTime(1.6, ac.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
-    const gainOsc = ac.createGain();
-    gainOsc.gain.setValueAtTime(0.6, ac.currentTime);
-    gainOsc.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur * 0.7);
-    noise.connect(flt); flt.connect(gain); gain.connect(ac.destination);
-    osc.connect(gainOsc); gainOsc.connect(ac.destination);
-    noise.start(); osc.start();
-    setTimeout(() => ac.close().catch(() => {}), (dur + 1) * 1000);
-  } catch { /* AudioContext unavailable */ }
+    const audio = new AudioContext();
+    const now = audio.currentTime;
+    const duration = 1.25;
+    const noiseBuffer = audio.createBuffer(1, Math.floor(audio.sampleRate * duration), audio.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+
+    const noise = audio.createBufferSource();
+    noise.buffer = noiseBuffer;
+    const filter = audio.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2300, now);
+    filter.frequency.exponentialRampToValueAtTime(620, now + duration);
+    filter.Q.value = 0.85;
+
+    const screech = audio.createOscillator();
+    screech.type = 'sawtooth';
+    screech.frequency.setValueAtTime(980, now);
+    screech.frequency.exponentialRampToValueAtTime(140, now + duration);
+
+    const bass = audio.createOscillator();
+    bass.type = 'square';
+    bass.frequency.setValueAtTime(72, now);
+    bass.frequency.exponentialRampToValueAtTime(38, now + 0.42);
+
+    const master = audio.createGain();
+    master.gain.setValueAtTime(0.001, now);
+    master.gain.exponentialRampToValueAtTime(1.0, now + 0.025);
+    master.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    const bassGain = audio.createGain();
+    bassGain.gain.setValueAtTime(0.65, now);
+    bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
+
+    noise.connect(filter);
+    filter.connect(master);
+    screech.connect(master);
+    bass.connect(bassGain);
+    bassGain.connect(master);
+    master.connect(audio.destination);
+    noise.start(now);
+    screech.start(now);
+    bass.start(now);
+    noise.stop(now + duration);
+    screech.stop(now + duration);
+    bass.stop(now + 0.5);
+    setTimeout(() => audio.close().catch(() => {}), 1800);
+  } catch {
+    // Browser audio can be unavailable; the visual screamer still appears.
+  }
 }
 
-// ════════════════════════════ КОМПОНЕНТ ════════════════════════════
 export function QasqyrGame({ onExit }: { onExit?: () => void }) {
-  const [screen, setScreen] = useState<'intro' | 'playing' | 'over'>('intro');
-  const [chosen, setChosen] = useState<CharacterId>('baha');
-  const [result, setResult] = useState<{ kind: 'win' | 'lose'; title: string; text: string } | null>(null);
+  const mountRef = useRef<HTMLDivElement>(null);
+  const keysRef = useRef(new Set<string>());
+  const playerRef = useRef(new THREE.Vector3(0, 0, START_Z));
+  const playerVelocityRef = useRef(new THREE.Vector3());
+  const aimRef = useRef(new THREE.Vector2(0, -1));
+  const enemiesRef = useRef<Enemy[]>([]);
+  const pickupsRef = useRef<Pickup[]>([]);
+  const inventoryRef = useRef<InventoryEntry[]>([]);
+  const fakeFortressesRef = useRef<FakeFortress[]>([]);
+  const houseNpcsRef = useRef<HouseNpc[]>([]);
+  const insideHouseRef = useRef<number | null>(null);
+  const exitHouseBurstRef = useRef(0);
+  const keyRef = useRef<QuestItem>(randomQuestPoint());
+  const codeRef = useRef<QuestItem>(randomQuestPoint());
+  const hpRef = useRef(100);
+  const scoreRef = useRef(0);
+  const dayTimeRef = useRef(0.24);
+  const staminaRef = useRef(STAMINA_MAX);
+  const walkModeRef = useRef<WalkMode>('walk');
+  const storyFlagsRef = useRef<StoryFlags>({ trust: 0, lore: 0, risk: 0, cruelty: 0 });
+  const difficultyRef = useRef<Difficulty>('survival');
+  const endingRef = useRef('');
+  const weaponRef = useRef<WeaponKind>('knife');
+  const selectedSlotRef = useRef(0);
+  const heldItemRef = useRef<PickupKind>('knife');
+  const attackCdRef = useRef(0);
+  const spawnTimerRef = useRef(0);
+  const nextEventRef = useRef(EVENT_INTERVAL);
+  const eventTimerRef = useRef(0);
+  const eventKindRef = useRef<EventKind | null>(null);
+  const dimensionRef = useRef<Dimension>('steppe');
+  const dimensionTimerRef = useRef(0);
+  const teleportCooldownRef = useRef(0);
+  const deathTriggeredRef = useRef(false);
+  const hintRef = useRef('WASD: движение, мышь: прицел, клик/Space: удар');
+  const [phase, setPhase] = useState<GamePhase>('intro');
+  const [difficulty, setDifficulty] = useState<Difficulty>('survival');
+  const [vision, setVision] = useState<VisionKind>('');
+  const [ending, setEnding] = useState('');
+  const [taunt, setTaunt] = useState('');
+  const [dialog, setDialog] = useState<DialogState | null>(null);
   const [jumpscare, setJumpscare] = useState(false);
-  const [riddle, setRiddle] = useState<number | null>(null); // 0 или 1 — индекс загадки
+  const [hud, setHud] = useState({
+    hp: 100,
+    score: 0,
+    distance: 100,
+    nextEvent: EVENT_INTERVAL,
+    event: '',
+    eventLeft: 0,
+    timeOfDay: dayPhaseLabel(dayPhaseAt(dayTimeRef.current)),
+    stamina: STAMINA_MAX,
+    walkMode: walkModeLabel('walk' as WalkMode),
+    difficulty: DIFFICULTY.survival.label,
+    story: 0,
+    weapon: WEAPONS.knife.name,
+    heldItem: ITEM_LABELS.knife,
+    selectedSlot: 0,
+    dimension: 'Степь',
+    teleport: 0,
+    dimensionLeft: 0,
+    hasKey: false,
+    hasCode: false,
+    keyNav: questNav(playerRef.current, keyRef.current),
+    codeNav: questNav(playerRef.current, codeRef.current),
+    inventory: [] as InventoryEntry[],
+    hint: hintRef.current,
+  });
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const worldRef = useRef<World | null>(null);
-  const keysRef = useRef<Set<string>>(new Set());
-  const mouseRef = useRef<{ x: number; y: number; down: boolean }>({ x: 0, y: 0, down: false });
+  const reset = () => {
+    difficultyRef.current = difficulty;
+    const balance = DIFFICULTY[difficultyRef.current];
+    playerRef.current.set(0, 0, START_Z);
+    playerVelocityRef.current.set(0, 0, 0);
+    aimRef.current.set(0, -1);
+    enemiesRef.current = [];
+    pickupsRef.current = [];
+    inventoryRef.current = [{ kind: 'knife', count: 1 }];
+    fakeFortressesRef.current = FAKE_FORTRESSES.map((fortress) => ({ ...fortress, triggered: false }));
+    houseNpcsRef.current = HOUSE_NPCS.map((npc) => ({ ...npc, visited: false }));
+    insideHouseRef.current = null;
+    exitHouseBurstRef.current = 0;
+    keyRef.current = randomQuestPoint();
+    codeRef.current = randomQuestPoint();
+    hpRef.current = balance.hp;
+    scoreRef.current = 0;
+    dayTimeRef.current = 0.24;
+    staminaRef.current = STAMINA_MAX;
+    walkModeRef.current = 'walk';
+    storyFlagsRef.current = { trust: 0, lore: 0, risk: 0, cruelty: 0 };
+    endingRef.current = '';
+    weaponRef.current = 'knife';
+    selectedSlotRef.current = 0;
+    heldItemRef.current = 'knife';
+    attackCdRef.current = 0;
+    spawnTimerRef.current = 0;
+    nextEventRef.current = balance.eventInterval;
+    eventTimerRef.current = 0;
+    eventKindRef.current = null;
+    dimensionRef.current = 'steppe';
+    dimensionTimerRef.current = 0;
+    teleportCooldownRef.current = 0;
+    deathTriggeredRef.current = false;
+    hintRef.current = 'Найди ключ и код от крепости. Стрелки показывают путь.';
+    setTaunt('');
+    setDialog(null);
+    setJumpscare(false);
+    setVision('');
+    setEnding('');
+    setHud({
+      hp: balance.hp,
+      score: 0,
+      distance: 100,
+      nextEvent: balance.eventInterval,
+      event: '',
+      eventLeft: 0,
+      timeOfDay: dayPhaseLabel(dayPhaseAt(dayTimeRef.current)),
+      stamina: STAMINA_MAX,
+      walkMode: walkModeLabel('walk'),
+      difficulty: balance.label,
+      story: 0,
+    weapon: WEAPONS.knife.name,
+    heldItem: ITEM_LABELS.knife,
+    selectedSlot: 0,
+      dimension: 'Степь',
+      teleport: 0,
+      dimensionLeft: 0,
+      hasKey: false,
+      hasCode: false,
+      keyNav: questNav(playerRef.current, keyRef.current),
+      codeNav: questNav(playerRef.current, codeRef.current),
+      inventory: [...inventoryRef.current],
+      hint: hintRef.current,
+    });
+  };
 
-  function handleRiddleAnswer(riddleIdx: number, answerIdx: number) {
-    const w = worldRef.current;
-    if (!w) return;
-    const r = RIDDLES[riddleIdx];
-    if (answerIdx === r.correct) {
-      addItem(w, r.reward);
-      w.riddleSolved[riddleIdx] = true;
-      banner(w, r.rewardText);
-    } else {
-      w.hp = Math.max(1, w.hp - 20);
-      w.hurtFlash = 0.4;
-      banner(w, r.wrongText);
-    }
-    setRiddle(null);
-  }
-
-  function startGame(c: CharacterId) {
-    setChosen(c);
-    worldRef.current = makeWorld(c);
-    setResult(null);
-    setScreen('playing');
-    // попытка перейти в полноэкранный режим браузера
-    const el = document.getElementById('qasqyr-root');
-    if (el && el.requestFullscreen) el.requestFullscreen().catch(() => {});
-  }
-
-  // ── Игровой цикл ──
   useEffect(() => {
-    if (screen !== 'playing') return;
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext('2d')!;
-    let raf = 0; let last = performance.now(); let stopped = false;
+    if (phase !== 'playing') return;
+    const mount = mountRef.current;
+    if (!mount) return;
+    const balance = DIFFICULTY[difficultyRef.current];
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x9fb7c9);
+    scene.fog = new THREE.Fog(0x9fb7c9, 55, 410);
+
+    const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.92;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    mount.appendChild(renderer.domElement);
+
+    const shaderMaterials = new Set<THREE.ShaderMaterial>();
+    const trackShaders = (object: THREE.Object3D) => {
+      object.traverse((part) => {
+        if (part instanceof THREE.Mesh && part.material instanceof THREE.ShaderMaterial) shaderMaterials.add(part.material);
+      });
+    };
+
+    const skyDome = makeSkyDome();
+    scene.add(skyDome);
+    trackShaders(skyDome);
+
+    const hemi = new THREE.HemisphereLight(0xd7e8ff, 0x3a432d, 0.74);
+    scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xffd09a, 4.35);
+    sun.position.set(-44, 58, 28);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.bias = -0.00012;
+    sun.shadow.normalBias = 0.025;
+    sun.shadow.camera.left = -230;
+    sun.shadow.camera.right = 230;
+    sun.shadow.camera.top = 230;
+    sun.shadow.camera.bottom = -230;
+    scene.add(sun);
+    scene.add(sun.target);
+    const rimLight = new THREE.DirectionalLight(0x8ccfff, 0.95);
+    rimLight.position.set(38, 26, -42);
+    scene.add(rimLight);
+
+    const groundGeo = new THREE.PlaneGeometry(WORLD_HALF * 2 + 70, START_Z - FINISH_Z + 140, 72, 180);
+    const groundPos = groundGeo.attributes.position;
+    for (let i = 0; i < groundPos.count; i++) {
+      const x = groundPos.getX(i);
+      const y = groundPos.getY(i);
+      const wave = Math.sin(x * 0.035) * 0.75 + Math.cos(y * 0.024) * 0.9 + Math.sin((x + y) * 0.018) * 0.55;
+      groundPos.setZ(i, wave);
+    }
+    groundGeo.computeVertexNormals();
+    const ground = new THREE.Mesh(
+      groundGeo,
+      makeGroundShaderMaterial(12.5),
+    );
+    ground.userData.shader = 'ground';
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.z = (START_Z + FINISH_Z) / 2 - 18;
+    ground.receiveShadow = true;
+    scene.add(ground);
+    trackShaders(ground);
+
+    const path = new THREE.Mesh(
+      new THREE.PlaneGeometry(22, START_Z - FINISH_Z + 80),
+      new THREE.MeshStandardMaterial({ color: 0x6d7440, roughness: 0.96 }),
+    );
+    path.rotation.x = -Math.PI / 2;
+    path.position.set(0, 0.02, (START_Z + FINISH_Z) / 2 - 10);
+    scene.add(path);
+
+    const dustMat = new THREE.MeshStandardMaterial({ color: 0x8a7a4c, roughness: 0.98 });
+    for (let i = 0; i < 18; i++) {
+      const patch = new THREE.Mesh(new THREE.CircleGeometry(randomRange(4, 11), 18), dustMat);
+      patch.rotation.x = -Math.PI / 2;
+      patch.position.set(randomRange(-WORLD_HALF + 18, WORLD_HALF - 18), 0.035, randomRange(FINISH_Z + 35, START_Z - 20));
+      patch.scale.x = randomRange(1.0, 2.4);
+      patch.scale.y = randomRange(0.55, 1.2);
+      patch.rotation.z = randomRange(0, Math.PI);
+      scene.add(patch);
+    }
+
+    const grassMat = new THREE.MeshStandardMaterial({ color: 0x4d5e36, roughness: 0.95 });
+    const strawMat = new THREE.MeshStandardMaterial({ color: 0xb0a35a, roughness: 0.98 });
+    for (let i = 0; i < 280; i++) {
+      const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.18 + (i % 3) * 0.08, 0.9 + (i % 5) * 0.24, 5), i % 4 === 0 ? strawMat : grassMat);
+      tuft.position.set(randomRange(-WORLD_HALF, WORLD_HALF), 0.6, randomRange(FINISH_Z + 20, START_Z + 4));
+      tuft.rotation.y = i * 0.71;
+      tuft.castShadow = true;
+      scene.add(tuft);
+    }
+
+    for (let i = 0; i < 38; i++) {
+      placeScenery(scene, makeRockCluster(), randomRange(-WORLD_HALF + 8, WORLD_HALF - 8), randomRange(FINISH_Z + 28, START_Z - 18), randomRange(0.7, 1.8));
+    }
+    for (let i = 0; i < 24; i++) {
+      placeScenery(scene, makeDryTree(), randomRange(-WORLD_HALF + 12, WORLD_HALF - 12), randomRange(FINISH_Z + 42, START_Z - 28), randomRange(0.75, 1.4));
+    }
+    for (let i = 0; i < 9; i++) {
+      placeScenery(scene, makeRuin(), randomRange(-WORLD_HALF + 28, WORLD_HALF - 28), randomRange(FINISH_Z + 70, START_Z - 60), randomRange(0.7, 1.35));
+    }
+    for (let i = 0; i < 7; i++) {
+      placeScenery(scene, makeCampDebris(), randomRange(-WORLD_HALF + 24, WORLD_HALF - 24), randomRange(FINISH_Z + 55, START_Z - 50), randomRange(0.8, 1.3));
+    }
+
+    const physicsObstacles: PhysicsObstacle[] = [];
+    const addObstacle = (obstacle: PhysicsObstacle) => physicsObstacles.push(obstacle);
+
+    scene.add(makeFortress(0, FINISH_Z - 10, false));
+    addObstacle({ key: 'fortress-real', x: 0, z: FINISH_Z - 10, radius: 10, kind: 'solid' });
+    for (const fake of fakeFortressesRef.current) {
+      scene.add(makeFortress(fake.x, fake.z, true));
+      addObstacle({ key: `fake-${fake.id}`, x: fake.x, z: fake.z, radius: 8, kind: 'solid' });
+    }
+    for (const npc of houseNpcsRef.current) {
+      const house = makeHouse(npc.mood);
+      house.position.set(npc.x, 0, npc.z);
+      house.rotation.y = npc.x < 0 ? -0.28 : 0.28;
+      scene.add(house);
+      addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 5.2, kind: 'solid' });
+
+      const figure = makeNpcFigure(npc.mood);
+      figure.position.set(npc.x, 0, npc.z - 4.8);
+      scene.add(figure);
+    }
+
+    const worldChunks = new Map<string, THREE.Group>();
+    const updateWorldChunks = () => {
+      const pcx = Math.floor(playerRef.current.x / CHUNK_SIZE);
+      const pcz = Math.floor(playerRef.current.z / CHUNK_SIZE);
+      const needed = new Set<string>();
+
+      for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
+        for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
+          const cx = pcx + dx;
+          const cz = pcz + dz;
+          const key = `${cx},${cz}`;
+          needed.add(key);
+          if (!worldChunks.has(key)) {
+            const chunk = makeWorldChunk(cx, cz);
+            worldChunks.set(key, chunk);
+            scene.add(chunk);
+            trackShaders(chunk);
+            const chunkObstacles = (chunk.userData.obstacles as Omit<PhysicsObstacle, 'key'>[] | undefined) ?? [];
+            for (const obstacle of chunkObstacles) {
+              addObstacle({
+                ...obstacle,
+                key,
+                x: chunk.position.x + obstacle.x,
+                z: chunk.position.z + obstacle.z,
+              });
+            }
+          }
+        }
+      }
+
+      for (const [key, chunk] of worldChunks) {
+        if (!needed.has(key)) {
+          chunk.traverse((part) => {
+            if (part instanceof THREE.Mesh && part.material instanceof THREE.ShaderMaterial) shaderMaterials.delete(part.material);
+          });
+          scene.remove(chunk);
+          worldChunks.delete(key);
+          for (let i = physicsObstacles.length - 1; i >= 0; i--) {
+            if (physicsObstacles[i].key === key) physicsObstacles.splice(i, 1);
+          }
+        }
+      }
+    };
+    updateWorldChunks();
+
+    const player = new THREE.Group();
+    const coatMat = new THREE.MeshStandardMaterial({ color: 0x2c5f86, roughness: 0.72 });
+    const shirtMat = new THREE.MeshStandardMaterial({ color: 0xd8c9a1, roughness: 0.72 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xc98f62, roughness: 0.68 });
+    const leatherMat = new THREE.MeshStandardMaterial({ color: 0x4a2f22, roughness: 0.82 });
+    const hairMat = new THREE.MeshStandardMaterial({ color: 0x201712, roughness: 0.9 });
+    const bootMat = new THREE.MeshStandardMaterial({ color: 0x1b1714, roughness: 0.84 });
+    const furMat = new THREE.MeshStandardMaterial({ color: 0xe5dcc8, roughness: 0.94 });
+    const hloodMat = new THREE.MeshBasicMaterial({ color: 0x9cf3ff, transparent: true, opacity: 0.28 });
+    const playerBody = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.48, 1.48, 7, 16),
+      coatMat,
+    );
+    playerBody.position.y = 1.46;
+    playerBody.scale.set(0.95, 1.08, 0.7);
+    playerBody.castShadow = true;
+    const shirtFront = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.92, 0.04), shirtMat);
+    shirtFront.position.set(0, 1.5, -0.39);
+    shirtFront.castShadow = true;
+    const playerHead = new THREE.Mesh(
+      new THREE.SphereGeometry(0.38, 18, 16),
+      skinMat,
+    );
+    playerHead.position.set(0, 2.62, -0.03);
+    playerHead.scale.set(0.92, 1.08, 0.86);
+    playerHead.castShadow = true;
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.4, 14, 10), hairMat);
+    hair.position.set(0, 2.82, 0.02);
+    hair.scale.set(0.98, 0.38, 0.9);
+    hair.castShadow = true;
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.18, 8), skinMat);
+    nose.position.set(0, 2.58, -0.39);
+    nose.rotation.x = Math.PI / 2;
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x171717 });
+    const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 8), eyeMat);
+    const rightEye = leftEye.clone();
+    leftEye.position.set(-0.12, 2.68, -0.34);
+    rightEye.position.set(0.12, 2.68, -0.34);
+    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.025, 0.025), new THREE.MeshBasicMaterial({ color: 0x3f1d19 }));
+    mouth.position.set(0, 2.45, -0.36);
+    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.52, 0.3, 16), furMat);
+    hat.position.y = 3.05;
+    hat.castShadow = true;
+    const belt = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.18, 0.38), leatherMat);
+    belt.position.set(0, 1.25, -0.02);
+    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.82, 1.05, 0.38), leatherMat);
+    pack.position.set(0, 1.45, 0.72);
+    pack.castShadow = true;
+    const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.06, 8, 24), new THREE.MeshStandardMaterial({ color: 0xc84836, roughness: 0.65 }));
+    scarf.position.y = 2.13;
+    scarf.rotation.x = Math.PI / 2;
+    const playerWalkParts: { part: THREE.Object3D; side: number; baseX: number; baseZ: number; role: 'arm' | 'leg' }[] = [];
+    for (const side of [-1, 1]) {
+      const upperArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.105, 0.62, 4, 8), coatMat);
+      upperArm.position.set(side * 0.56, 1.66, -0.03);
+      upperArm.rotation.z = side * 0.32;
+      upperArm.castShadow = true;
+      player.add(upperArm);
+      playerWalkParts.push({ part: upperArm, side, baseX: upperArm.rotation.x, baseZ: upperArm.rotation.z, role: 'arm' });
+
+      const forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.55, 4, 8), skinMat);
+      forearm.position.set(side * 0.74, 1.22, -0.32);
+      forearm.rotation.z = side * 0.18;
+      forearm.rotation.x = -0.55;
+      forearm.castShadow = true;
+      player.add(forearm);
+      playerWalkParts.push({ part: forearm, side, baseX: forearm.rotation.x, baseZ: forearm.rotation.z, role: 'arm' });
+
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), skinMat);
+      hand.position.set(side * 0.8, 0.98, -0.55);
+      hand.scale.set(0.8, 0.62, 1);
+      hand.castShadow = true;
+      player.add(hand);
+
+      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.76, 4, 8), leatherMat);
+      thigh.position.set(side * 0.22, 0.82, 0.02);
+      thigh.castShadow = true;
+      player.add(thigh);
+      playerWalkParts.push({ part: thigh, side, baseX: thigh.rotation.x, baseZ: thigh.rotation.z, role: 'leg' });
+
+      const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.72, 4, 8), leatherMat);
+      shin.position.set(side * 0.22, 0.28, -0.03);
+      shin.castShadow = true;
+      player.add(shin);
+      playerWalkParts.push({ part: shin, side, baseX: shin.rotation.x, baseZ: shin.rotation.z, role: 'leg' });
+
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.16, 0.5), bootMat);
+      boot.position.set(side * 0.22, 0.04, -0.22);
+      boot.castShadow = true;
+      player.add(boot);
+    }
+    const hloodAura = new THREE.Mesh(new THREE.SphereGeometry(1.75, 24, 16), hloodMat);
+    hloodAura.position.y = 1.55;
+    hloodAura.visible = false;
+    const blade = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.15, 2.15),
+      new THREE.MeshStandardMaterial({ color: WEAPONS.knife.color, metalness: 0.35, roughness: 0.22 }),
+    );
+    blade.position.set(0.82, 1.45, -0.8);
+    player.add(playerBody, shirtFront, playerHead, hair, nose, leftEye, rightEye, mouth, hat, belt, pack, scarf, hloodAura, blade);
+    scene.add(player);
+    const playerShadow = new THREE.Mesh(
+      new THREE.CircleGeometry(1.25, 28),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false }),
+    );
+    playerShadow.rotation.x = -Math.PI / 2;
+    scene.add(playerShadow);
+    const dustPuffs: DustPuff[] = [];
+    const spawnFootDust = (side: number, speedRatio: number) => {
+      const material = new THREE.MeshBasicMaterial({
+        color: dimensionRef.current === 'hloddev' ? 0xb7f6ff : 0x8c7650,
+        transparent: true,
+        opacity: 0.24,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(new THREE.CircleGeometry(0.32 + speedRatio * 0.22, 14), material);
+      const yaw = player.rotation.y;
+      const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+      const back = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+      mesh.position.copy(playerRef.current);
+      mesh.position.addScaledVector(right, side * 0.34);
+      mesh.position.addScaledVector(back, 0.52);
+      mesh.position.y = playerRef.current.y + 0.035;
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.rotation.z = randomRange(0, Math.PI * 2);
+      scene.add(mesh);
+      dustPuffs.push({ mesh, life: 0.68, age: 0 });
+    };
+
+    const addEnemy = (nearPlayer = true) => {
+      const mesh = makeEnemy();
+      const angle = randomRange(0, Math.PI * 2);
+      const radius = randomRange(32, 72);
+      const x = nearPlayer ? playerRef.current.x + Math.cos(angle) * radius : randomRange(-WORLD_HALF + 8, WORLD_HALF - 8);
+      const z = nearPlayer ? playerRef.current.z + Math.sin(angle) * radius : randomRange(FINISH_Z + 28, START_Z - 35);
+      mesh.position.set(x, 0, z);
+      scene.add(mesh);
+      enemiesRef.current.push({
+        mesh,
+        hp: 42 * balance.enemyHp,
+        speed: (6.2 + Math.random() * 3.2) * balance.enemySpeed,
+        damage: 17 * balance.enemyDamage,
+        hitTimer: 0,
+      });
+    };
+
+    const clearEnemies = () => {
+      for (const enemy of enemiesRef.current) scene.remove(enemy.mesh);
+      enemiesRef.current = [];
+    };
+
+    const enterHouse = (npc: HouseNpc) => {
+      insideHouseRef.current = npc.id;
+      clearEnemies();
+      hintRef.current = `Ты вошел в дом: ${npc.title}. Снаружи стало тихо.`;
+      setDialog({ npc: { ...npc }, step: 0, lastReply: '' });
+      setHud((h) => ({ ...h, hint: hintRef.current }));
+    };
+
+    const addPickup = (kind: PickupKind, x?: number, z?: number) => {
+      const mesh = makePickup(kind);
+      mesh.position.x = x ?? randomRange(-WORLD_HALF + 10, WORLD_HALF - 10);
+      mesh.position.z = z ?? randomRange(FINISH_Z + 24, START_Z - 15);
+      scene.add(mesh);
+      pickupsRef.current.push({ mesh, kind });
+    };
+
+    const startEvent = () => {
+      const eventKinds: EventKind[] = ['ambush', 'storm', 'rage', 'starvation'];
+      const event = eventKinds[Math.floor(Math.random() * eventKinds.length)];
+      eventKindRef.current = event;
+      eventTimerRef.current = EVENT_DURATION;
+      nextEventRef.current = balance.eventInterval;
+      hintRef.current = `Ивент: ${EVENT_LABELS[event]}. ${EVENT_HINTS[event]}`;
+      if (event === 'ambush') for (let i = 0; i < Math.round(9 / balance.spawn); i++) addEnemy(true);
+      if (event === 'starvation') hpRef.current = Math.max(12, hpRef.current - 14 * balance.enemyDamage);
+    };
+
+    for (let i = 0; i < 58; i++) addPickup(i % 3 === 0 || i % 11 === 0 ? 'medkit' : 'crystal');
+    for (const weapon of ['club', 'sabre', 'rifle', 'club', 'sabre'] as WeaponKind[]) {
+      addPickup(weapon, randomRange(-WORLD_HALF + 14, WORLD_HALF - 14), randomRange(FINISH_Z + 42, START_Z - 56));
+    }
+    addPickup('key', keyRef.current.x, keyRef.current.z);
+    addPickup('code', codeRef.current.x, codeRef.current.z);
+    for (let i = 0; i < 22; i++) addEnemy(false);
+
+    const clock = new THREE.Clock();
+    const music = createDynamicMusic();
+    let raf = 0;
+    let stopped = false;
+    let playerWalkTime = 0;
+    let playerYaw = Math.PI;
+    let cameraYaw = Math.PI;
+    let cameraPitch = 0;
+    let footSide = 1;
+    let footstepTimer = 0;
+    let visionTimer = 18;
+    let activeVision: VisionKind = '';
+    let activeVisionLeft = 0;
+    let previousDayPhase = dayPhaseAt(dayTimeRef.current);
 
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.floor(window.innerWidth * dpr);
-      canvas.height = Math.floor(window.innerHeight * dpr);
-      canvas.style.width = window.innerWidth + 'px';
-      canvas.style.height = window.innerHeight + 'px';
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
     };
-    resize();
-    window.addEventListener('resize', resize);
 
-    const finish = (kind: 'win' | 'lose') => {
-      const w = worldRef.current!;
-      if (w.result) return;
-      w.result = kind;
-      if (kind === 'win') {
-        const good = w.hp > w.maxHp * 0.4;
-        setResult(good
-          ? { kind, title: '🩸 Концовка «Вакцина»', text: 'Вы дошли до крепости. Кровь обоих друзей дала лекарство. Весной вы идёте по ожившей степи. Баха: «Я же говорил — у меня был план».' }
-          : { kind, title: '💔 Концовка «Цена»', text: 'Вы дошли, но еле живыми. Крови хватило на лекарство — мир спасён дорогой ценой.' });
-      } else {
-        setResult({ kind, title: '🐺 Концовка «Волки»', text: 'Степь забрала вас раньше, чем вы дошли. Где-то воет стая. Karasan победил.' });
-        playJumpscareSfx();
-        setJumpscare(true);
-        setTimeout(() => { setJumpscare(false); if (!stopped) setScreen('over'); }, 2800);
+    const attack = () => {
+      const held = heldItemRef.current;
+      if (!isWeapon(held)) {
+        hintRef.current = `${ITEM_LABELS[held]} РЅРµ РїРѕРјРѕР¶РµС‚ РІ РґСЂР°РєРµ. Р’С‹Р±РµСЂРё РѕСЂСѓР¶РёРµ РЅР° СЃР»РѕС‚Рµ 1-9.`;
+        setHud((h) => ({ ...h, hint: hintRef.current }));
         return;
       }
-      setTimeout(() => { if (!stopped) setScreen('over'); }, 700);
+      weaponRef.current = held;
+      const weapon = WEAPONS[held];
+      if (attackCdRef.current > 0) return;
+      attackCdRef.current = weapon.cooldown;
+      let hit = false;
+
+      for (const enemy of enemiesRef.current) {
+        const toEnemy = new THREE.Vector2(enemy.mesh.position.x - playerRef.current.x, enemy.mesh.position.z - playerRef.current.z);
+        const dist = toEnemy.length();
+        const dir = toEnemy.normalize();
+        const facing = aimRef.current.dot(dir);
+        if (dist < weapon.range && facing > 0.25) {
+          enemy.hp -= weapon.damage * (dimensionRef.current === 'hloddev' ? 1.28 : 1);
+          enemy.hitTimer = 0.18;
+          hit = true;
+        }
+      }
+
+      hintRef.current = hit ? `${weapon.name}: попадание!` : `${weapon.name}: слишком далеко.`;
+      setHud((h) => ({ ...h, hint: hintRef.current }));
     };
 
-    const loop = (now: number) => {
+    const teleportToHloddev = () => {
+      if (dimensionRef.current === 'hloddev') {
+        hintRef.current = 'Ты уже в Хлоддеве. Воздух звенит, как ледяное стекло.';
+        setHud((h) => ({ ...h, hint: hintRef.current }));
+        return;
+      }
+      if (teleportCooldownRef.current > 0) {
+        hintRef.current = `Переход в Хлоддев перезаряжается: ${Math.ceil(teleportCooldownRef.current)}с.`;
+        setHud((h) => ({ ...h, hint: hintRef.current }));
+        return;
+      }
+
+      dimensionRef.current = 'hloddev';
+      dimensionTimerRef.current = TELEPORT_DURATION;
+      teleportCooldownRef.current = TELEPORT_COOLDOWN;
+      scoreRef.current += 5;
+      hintRef.current = 'Переход открыт: Хлоддев. Враги слабее, ты быстрее, но холод ест HP.';
+      setTaunt('ХЛОДДЕВ: чужое измерение без солнца. Здесь стены дышат инеем, а тени идут следом.');
+      setTimeout(() => setTaunt(''), 3600);
+      setHud((h) => ({ ...h, hint: hintRef.current }));
+    };
+
+    const refreshHeldItemAfterUse = () => {
+      const item = inventoryRef.current[selectedSlotRef.current];
+      if (item) {
+        heldItemRef.current = item.kind;
+        if (isWeapon(item.kind)) weaponRef.current = item.kind;
+        return;
+      }
+
+      const fallbackSlot = inventoryRef.current.findIndex((entry) => isWeapon(entry.kind));
+      if (fallbackSlot >= 0) {
+        selectedSlotRef.current = fallbackSlot;
+        heldItemRef.current = inventoryRef.current[fallbackSlot].kind;
+        if (isWeapon(heldItemRef.current)) weaponRef.current = heldItemRef.current;
+      }
+    };
+
+    const selectInventorySlot = (slot: number) => {
+      selectedSlotRef.current = slot;
+      const item = inventoryRef.current[slot];
+      if (!item) {
+        hintRef.current = `РЎР»РѕС‚ ${slot + 1} РїСѓСЃС‚.`;
+        setHud((h) => ({ ...h, selectedSlot: slot, hint: hintRef.current }));
+        return;
+      }
+
+      heldItemRef.current = item.kind;
+      if (isWeapon(item.kind)) weaponRef.current = item.kind;
+      hintRef.current = `Р’ СЂСѓРєРµ: ${ITEM_LABELS[item.kind]}. ${item.kind === 'medkit' ? 'РќР°Р¶РјРё E, С‡С‚РѕР±С‹ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ.' : isWeapon(item.kind) ? 'РљР»РёРє Р±СЊРµС‚ РёРј.' : 'Р­С‚Рѕ РІР°Р¶РЅС‹Р№ РїСЂРµРґРјРµС‚.'}`;
+      setHud((h) => ({
+        ...h,
+        weapon: WEAPONS[weaponRef.current].name,
+        heldItem: ITEM_LABELS[heldItemRef.current],
+        selectedSlot: slot,
+        hint: hintRef.current,
+      }));
+    };
+
+    const useSelectedItem = () => {
+      const item = inventoryRef.current[selectedSlotRef.current];
+      if (!item || item.kind !== 'medkit') {
+        hintRef.current = 'Р’С‹Р±РµСЂРё СЃР»РѕС‚ СЃ Р°РїС‚РµС‡РєРѕР№ Рё РЅР°Р¶РјРё E.';
+        setHud((h) => ({ ...h, hint: hintRef.current }));
+        return;
+      }
+      if (hpRef.current >= balance.hp) {
+        hintRef.current = 'HP СѓР¶Рµ РїРѕР»РЅС‹Р№. РђРїС‚РµС‡РєСѓ Р»СѓС‡С€Рµ СЃРѕС…СЂР°РЅРёС‚СЊ.';
+        setHud((h) => ({ ...h, hint: hintRef.current }));
+        return;
+      }
+
+      item.count -= 1;
+      if (item.count <= 0) inventoryRef.current = inventoryRef.current.filter((entry) => entry !== item);
+      refreshHeldItemAfterUse();
+      hpRef.current = Math.min(balance.hp, hpRef.current + 32);
+      hintRef.current = 'РђРїС‚РµС‡РєР° РёСЃРїРѕР»СЊР·РѕРІР°РЅР°: +32 HP.';
+      setHud((h) => ({
+        ...h,
+        hp: Math.ceil(hpRef.current),
+        weapon: WEAPONS[weaponRef.current].name,
+        heldItem: ITEM_LABELS[heldItemRef.current],
+        selectedSlot: selectedSlotRef.current,
+        inventory: [...inventoryRef.current],
+        hint: hintRef.current,
+      }));
+    };
+
+    const useMedkit = () => {
+      const medkit = inventoryRef.current.find((item) => item.kind === 'medkit');
+      if (!medkit || medkit.count <= 0) {
+        hintRef.current = 'В инвентаре нет аптечек.';
+        setHud((h) => ({ ...h, hint: hintRef.current }));
+        return;
+      }
+      if (hpRef.current >= balance.hp) {
+        hintRef.current = 'HP уже полный. Аптечку лучше сохранить.';
+        setHud((h) => ({ ...h, hint: hintRef.current }));
+        return;
+      }
+      medkit.count -= 1;
+      if (medkit.count <= 0) inventoryRef.current = inventoryRef.current.filter((item) => item.kind !== 'medkit');
+      hpRef.current = Math.min(balance.hp, hpRef.current + 32);
+      hintRef.current = 'Аптечка использована: +32 HP.';
+      setHud((h) => ({ ...h, hp: Math.ceil(hpRef.current), inventory: [...inventoryRef.current], hint: hintRef.current }));
+    };
+
+    void useMedkit;
+
+    const keyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if (key === 'escape') {
+        setPhase('intro');
+        onExit?.();
+        return;
+      }
+      if (key === 'shift') {
+        renderer.domElement.requestPointerLock?.();
+        renderer.domElement.style.cursor = 'none';
+      }
+      if (key === ' ') {
+        e.preventDefault();
+        teleportToHloddev();
+        return;
+      }
+      if (/^[1-9]$/.test(key)) {
+        selectInventorySlot(Number(key) - 1);
+        return;
+      }
+      if (key === 'e') {
+        useSelectedItem();
+        return;
+      }
+      keysRef.current.add(key);
+    };
+    const keyUp = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      keysRef.current.delete(key);
+      if (key === 'shift') {
+        if (document.pointerLockElement === renderer.domElement) document.exitPointerLock?.();
+        renderer.domElement.style.cursor = '';
+      }
+    };
+    const pointerMove = (e: PointerEvent) => {
+      if (document.pointerLockElement === renderer.domElement || keysRef.current.has('shift')) {
+        cameraYaw -= e.movementX * 0.0027;
+        playerYaw = cameraYaw;
+        cameraPitch = clamp(cameraPitch - e.movementY * 0.0022, -0.52, 0.42);
+        aimRef.current.set(Math.sin(playerYaw), Math.cos(playerYaw)).normalize();
+        return;
+      }
+      const nx = (e.clientX / window.innerWidth) * 2 - 1;
+      const ny = (e.clientY / window.innerHeight) * 2 - 1;
+      aimRef.current.set(nx, ny - 0.35).normalize();
+    };
+    const pointerLockChange = () => {
+      renderer.domElement.style.cursor = document.pointerLockElement === renderer.domElement ? 'none' : '';
+    };
+    const pointerDown = () => attack();
+
+    window.addEventListener('resize', resize);
+    window.addEventListener('keydown', keyDown);
+    window.addEventListener('keyup', keyUp);
+    window.addEventListener('pointermove', pointerMove);
+    document.addEventListener('pointerlockchange', pointerLockChange);
+    window.addEventListener('pointerdown', pointerDown);
+
+    const loop = () => {
       if (stopped) return;
-      const dt = Math.min(0.05, (now - last) / 1000); last = now;
-      const w = worldRef.current!;
-      if (!w.result) { update(w, dt, keysRef.current, mouseRef.current, finish); }
-      render(ctx, w);
+      const dt = Math.min(clock.getDelta(), 0.045);
+      const activeEvent = eventKindRef.current;
+      const inHloddev = dimensionRef.current === 'hloddev';
+      const insideHouse = insideHouseRef.current !== null;
+      dayTimeRef.current = (dayTimeRef.current + dt / DAY_LENGTH) % 1;
+      const dayPhase = dayPhaseAt(dayTimeRef.current);
+      const nightFactor = dayPhase === 'night' ? 1.28 : dayPhase === 'dusk' ? 1.12 : 1;
+      if (dayPhase !== previousDayPhase) {
+        previousDayPhase = dayPhase;
+        hintRef.current = `Time changed: ${dayPhaseLabel(dayPhase)}. ${dayPhase === 'night' ? 'Enemies are faster and the steppe is darker.' : dayPhase === 'dawn' ? 'Dawn weakens the infected for a while.' : 'Visibility returns.'}`;
+      }
+      attackCdRef.current = Math.max(0, attackCdRef.current - dt);
+      spawnTimerRef.current -= dt;
+      nextEventRef.current -= dt;
+      teleportCooldownRef.current = Math.max(0, teleportCooldownRef.current - dt);
+      visionTimer -= dt;
+      activeVisionLeft = Math.max(0, activeVisionLeft - dt);
+      if (activeVision && activeVisionLeft <= 0) {
+        activeVision = '';
+        setVision('');
+      }
+      if (!activeVision && visionTimer <= 0) {
+        const roll = Math.random();
+        activeVision = roll < 0.34 ? 'bloodmoon' : roll < 0.67 ? 'echo' : 'whiteout';
+        activeVisionLeft = 5.5;
+        visionTimer = randomRange(24, 38);
+        setVision(activeVision);
+        hintRef.current = activeVision === 'bloodmoon'
+          ? 'Vision: the fortress remembers every violent choice.'
+          : activeVision === 'echo'
+            ? 'Vision: house voices open another branch of the story.'
+            : 'Vision: the steppe disappears for a breath. Keep walking.';
+      }
+
+      if (inHloddev) {
+        dimensionTimerRef.current -= dt;
+        hpRef.current -= dt * 0.55 * balance.enemyDamage;
+        if (dimensionTimerRef.current <= 0) {
+          dimensionRef.current = 'steppe';
+          dimensionTimerRef.current = 0;
+          hintRef.current = 'Хлоддев отпустил тебя обратно в степь.';
+        }
+      }
+
+      if (eventTimerRef.current > 0) {
+        eventTimerRef.current -= dt;
+        if (eventTimerRef.current <= 0) {
+          eventKindRef.current = null;
+          hintRef.current = 'Ивент закончился. До следующей беды меньше минуты.';
+        }
+      } else if (!insideHouse && nextEventRef.current <= 0) {
+        startEvent();
+      }
+
+      if (insideHouseRef.current === null && exitHouseBurstRef.current > 0) {
+        const count = exitHouseBurstRef.current;
+        exitHouseBurstRef.current = 0;
+        for (let i = 0; i < count; i++) addEnemy(true);
+        hintRef.current = 'Ты вышел из дома. Шум привлек зараженных.';
+      }
+
+      const stormPenalty = activeEvent === 'storm' ? 0.64 : 1;
+      const dimensionSpeed = inHloddev ? 1.32 : 1;
+      const keys = keysRef.current;
+      const strafe = (keys.has('d') ? 1 : 0) - (keys.has('a') ? 1 : 0);
+      const forwardInput = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
+      const hasMoveInput = strafe !== 0 || forwardInput !== 0;
+      const sneak = keys.has('control') || keys.has('c');
+      const wantsSprint = keys.has('shift') && !sneak && staminaRef.current > 8;
+      const sprint = wantsSprint && hasMoveInput;
+      const cameraForward = new THREE.Vector3(Math.sin(cameraYaw), 0, Math.cos(cameraYaw));
+      const cameraRight = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw));
+      const move = new THREE.Vector3()
+        .addScaledVector(cameraForward, forwardInput)
+        .addScaledVector(cameraRight, strafe);
+      const movementScale = sneak ? 0.58 : sprint ? 1.52 : staminaRef.current < 6 ? 0.82 : 1;
+      walkModeRef.current = sneak ? 'sneak' : sprint ? 'sprint' : staminaRef.current < 12 ? 'tired' : 'walk';
+      if (move.lengthSq() > 0) {
+        move.normalize();
+        const sprintBoost = sprint ? 1.62 : sneak ? 0.72 : 1;
+        playerVelocityRef.current.addScaledVector(move, PLAYER_ACCEL * sprintBoost * stormPenalty * dimensionSpeed * dt);
+      }
+      if (sprint) {
+        staminaRef.current = Math.max(0, staminaRef.current - dt * 24);
+      } else {
+        staminaRef.current = Math.min(STAMINA_MAX, staminaRef.current + dt * (sneak ? 18 : 12));
+      }
+      const maxSpeed = PLAYER_SPEED * movementScale * stormPenalty * dimensionSpeed;
+      const horizontalSpeed = Math.hypot(playerVelocityRef.current.x, playerVelocityRef.current.z);
+      if (horizontalSpeed > maxSpeed) {
+        playerVelocityRef.current.x = (playerVelocityRef.current.x / horizontalSpeed) * maxSpeed;
+        playerVelocityRef.current.z = (playerVelocityRef.current.z / horizontalSpeed) * maxSpeed;
+      }
+      const drag = Math.max(0, 1 - PLAYER_FRICTION * dt);
+      playerVelocityRef.current.x *= drag;
+      playerVelocityRef.current.z *= drag;
+      playerRef.current.addScaledVector(playerVelocityRef.current, dt);
+      const waterDrag = resolvePlayerPhysics(playerRef.current, playerVelocityRef.current, physicsObstacles);
+      playerVelocityRef.current.x *= waterDrag;
+      playerVelocityRef.current.z *= waterDrag;
+      const currentSpeed = Math.hypot(playerVelocityRef.current.x, playerVelocityRef.current.z);
+      playerRef.current.y = terrainHeightAt(playerRef.current.x, playerRef.current.z);
+      const playerMoving = currentSpeed > 0.9 || move.lengthSq() > 0;
+      const speedRatio = clamp(currentSpeed / PLAYER_SPEED, 0, 1.45);
+      playerWalkTime += playerMoving ? dt * (inHloddev ? 9.8 : 7.4) * (0.82 + speedRatio * 0.52) : dt * 2.6;
+      if (currentSpeed > 0.7) {
+        playerYaw = lerpAngle(playerYaw, Math.atan2(playerVelocityRef.current.x, playerVelocityRef.current.z), PLAYER_TURN_SPEED * dt);
+      }
+      footstepTimer -= dt;
+      if (playerMoving && !sneak && footstepTimer <= 0 && insideHouseRef.current === null) {
+        spawnFootDust(footSide, speedRatio);
+        footSide *= -1;
+        footstepTimer = sprint ? 0.18 : 0.24;
+      }
+      playerRef.current.x = clamp(playerRef.current.x, -FAR_WORLD_LIMIT, FAR_WORLD_LIMIT);
+      playerRef.current.z = clamp(playerRef.current.z, -FAR_WORLD_LIMIT, FAR_WORLD_LIMIT);
+      updateWorldChunks();
+
+      if (!insideHouse) {
+        for (const npc of houseNpcsRef.current) {
+          if (npc.visited) continue;
+          const dist = Math.hypot(playerRef.current.x - npc.x, playerRef.current.z - npc.z);
+          if (dist < 8.5) {
+            enterHouse(npc);
+            break;
+          }
+        }
+      }
+
+      player.position.copy(playerRef.current);
+      player.rotation.y = playerYaw;
+      aimRef.current.set(Math.sin(playerYaw), Math.cos(playerYaw)).normalize();
+      const localSideSpeed = playerVelocityRef.current.x * Math.cos(playerYaw) - playerVelocityRef.current.z * Math.sin(playerYaw);
+      const localForwardSpeed = playerVelocityRef.current.x * Math.sin(playerYaw) + playerVelocityRef.current.z * Math.cos(playerYaw);
+      player.rotation.x = clamp(-localForwardSpeed * 0.006, -0.08, 0.08);
+      player.rotation.z = clamp(-localSideSpeed * 0.015, -0.14, 0.14);
+      const stride = playerMoving ? Math.sin(playerWalkTime) : 0;
+      const settle = playerMoving ? 1 : 0.18;
+      player.position.y = playerRef.current.y + Math.abs(stride) * 0.07 * clamp(currentSpeed / PLAYER_SPEED, 0.35, 1.1);
+      playerShadow.position.set(playerRef.current.x, playerRef.current.y + 0.012, playerRef.current.z);
+      playerShadow.scale.setScalar(1 + Math.min(0.28, currentSpeed * 0.012));
+      const shadowMat = playerShadow.material;
+      if (shadowMat instanceof THREE.MeshBasicMaterial) shadowMat.opacity = inHloddev ? 0.18 : 0.28;
+      for (const limb of playerWalkParts) {
+        const swing = Math.sin(playerWalkTime + (limb.side > 0 ? 0 : Math.PI));
+        limb.part.rotation.x = limb.baseX + swing * (limb.role === 'arm' ? 0.55 : 0.42) * settle;
+        limb.part.rotation.z = limb.baseZ + swing * (limb.role === 'arm' ? 0.08 : 0.05) * settle;
+      }
+      hloodAura.visible = inHloddev;
+      hloodAura.rotation.y += dt * 1.8;
+      hloodAura.scale.setScalar(1 + Math.sin(performance.now() * 0.008) * 0.04);
+      const heldScale = heldItemScale(heldItemRef.current);
+      blade.scale.set(heldScale.x, heldScale.y, heldScale.z);
+      const bladeMat = blade.material;
+      if (bladeMat instanceof THREE.MeshStandardMaterial) bladeMat.color.setHex(heldItemColor(heldItemRef.current));
+      const heldWeapon = isWeapon(heldItemRef.current) ? WEAPONS[heldItemRef.current] : null;
+      blade.rotation.x = heldWeapon && attackCdRef.current > heldWeapon.cooldown * 0.55 ? -0.9 : -0.25;
+
+      for (let i = dustPuffs.length - 1; i >= 0; i--) {
+        const puff = dustPuffs[i];
+        puff.age += dt;
+        const k = clamp(puff.age / puff.life, 0, 1);
+        puff.mesh.scale.setScalar(1 + k * 2.2);
+        puff.mesh.material.opacity = (1 - k) * (inHloddev ? 0.16 : 0.24);
+        puff.mesh.position.y = terrainHeightAt(puff.mesh.position.x, puff.mesh.position.z) + 0.04;
+        if (k >= 1) {
+          scene.remove(puff.mesh);
+          puff.mesh.geometry.dispose();
+          puff.mesh.material.dispose();
+          dustPuffs.splice(i, 1);
+        }
+      }
+
+      for (const pickup of pickupsRef.current) {
+        pickup.mesh.rotation.y += dt * 1.8;
+        pickup.mesh.position.y = (pickup.kind === 'code' ? 0.12 : pickup.kind === 'medkit' ? 0.55 : 0.8) + Math.sin(performance.now() * 0.003 + pickup.mesh.position.x) * 0.14;
+      }
+
+      pickupsRef.current = pickupsRef.current.filter((pickup) => {
+        const dist = pickup.mesh.position.distanceTo(playerRef.current);
+        if (dist > 2.25) return true;
+        scene.remove(pickup.mesh);
+        inventoryRef.current = addInventoryItem(inventoryRef.current, pickup.kind);
+        const pickedSlot = inventoryRef.current.findIndex((item) => item.kind === pickup.kind);
+
+        if (pickup.kind === 'medkit') {
+          hintRef.current = 'Аптечка добавлена в инвентарь. Нажми H, чтобы лечиться.';
+        } else if (pickup.kind === 'crystal') {
+          scoreRef.current += 10;
+          hintRef.current = 'Кристалл добавлен в инвентарь: +10 очков.';
+        } else if (pickup.kind === 'key') {
+          keyRef.current.collected = true;
+          scoreRef.current += 40;
+          hintRef.current = 'Ключ от крепости найден. Теперь нужен код.';
+        } else if (pickup.kind === 'code') {
+          codeRef.current.collected = true;
+          scoreRef.current += 40;
+          hintRef.current = 'Код от ворот найден. Теперь нужен ключ.';
+        } else {
+          weaponRef.current = pickup.kind;
+          heldItemRef.current = pickup.kind;
+          if (pickedSlot >= 0) selectedSlotRef.current = pickedSlot;
+          scoreRef.current += 15;
+          hintRef.current = `Оружие найдено: ${WEAPONS[pickup.kind].name}`;
+        }
+        setHud((h) => ({
+          ...h,
+          weapon: WEAPONS[weaponRef.current].name,
+          heldItem: ITEM_LABELS[heldItemRef.current],
+          selectedSlot: selectedSlotRef.current,
+          inventory: [...inventoryRef.current],
+          hint: hintRef.current,
+        }));
+        return false;
+      });
+
+      for (const fake of fakeFortressesRef.current) {
+        if (fake.triggered) continue;
+        const dist = Math.hypot(playerRef.current.x - fake.x, playerRef.current.z - fake.z);
+        if (dist < 10.5) {
+          fake.triggered = true;
+          scoreRef.current = Math.max(0, scoreRef.current - 15);
+          hpRef.current = Math.max(8, hpRef.current - 8);
+          hintRef.current = 'Ложная крепость: -15 очков и -8 HP за доверчивость.';
+          setTaunt(fake.message);
+          setTimeout(() => setTaunt(''), 4300);
+        }
+      }
+
+      if (insideHouseRef.current === null) for (const enemy of enemiesRef.current) {
+        enemy.hitTimer = Math.max(0, enemy.hitTimer - dt);
+        const dir = new THREE.Vector3().subVectors(playerRef.current, enemy.mesh.position);
+        dir.y = 0;
+        const dist = dir.length();
+        let enemyMoving = false;
+        if (dist > 0.1) {
+          dir.normalize();
+          const eventSpeed = activeEvent === 'rage' ? 1.45 : 1;
+          const dimensionDrag = inHloddev ? 0.72 : 1;
+          const stealthDrag = sneak && dist > 8 ? 0.62 : 1;
+          enemy.mesh.position.addScaledVector(dir, enemy.speed * eventSpeed * dimensionDrag * nightFactor * stealthDrag * dt);
+          enemy.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+          enemyMoving = true;
+        }
+        const walkParts = enemy.mesh.userData.walkParts as { part: THREE.Object3D; side: number; baseX: number; baseZ: number }[] | undefined;
+        enemy.mesh.userData.phase = (enemy.mesh.userData.phase ?? 0) + dt * (enemyMoving ? 7.2 : 2.2);
+        const zombieStep = Math.sin(enemy.mesh.userData.phase);
+        enemy.mesh.rotation.z = (enemy.mesh.userData.baseRotZ ?? 0) + Math.sin(enemy.mesh.userData.phase * 0.5) * 0.08;
+        enemy.mesh.position.y = Math.abs(zombieStep) * 0.035;
+        if (walkParts) {
+          for (const limb of walkParts) {
+            const swing = Math.sin(enemy.mesh.userData.phase + (limb.side > 0 ? 0 : Math.PI));
+            limb.part.rotation.x = limb.baseX + swing * 0.28;
+            limb.part.rotation.z = limb.baseZ + swing * 0.12;
+          }
+        }
+        const mat = enemy.mesh.children[0] instanceof THREE.Mesh ? enemy.mesh.children[0].material : null;
+        if (mat instanceof THREE.MeshStandardMaterial) mat.color.set(enemy.hitTimer > 0 ? 0xfff1dc : inHloddev ? 0x2c6c82 : activeEvent === 'rage' ? 0xa72f26 : 0x793f34);
+        if (dist < PLAYER_RADIUS + ENEMY_RADIUS) hpRef.current -= enemy.damage * (activeEvent === 'rage' ? 1.55 : 1) * (inHloddev ? 0.62 : 1) * dt;
+      }
+
+      enemiesRef.current = enemiesRef.current.filter((enemy) => {
+        if (enemy.hp > 0) return true;
+        scene.remove(enemy.mesh);
+        scoreRef.current += 25;
+        if (Math.random() < 0.48) addPickup('medkit', enemy.mesh.position.x, enemy.mesh.position.z);
+        return false;
+      });
+
+      const maxEnemies = Math.round(((activeEvent === 'ambush' || activeEvent === 'rage' ? 24 : 18) / balance.spawn) * (dayPhase === 'night' ? 1.25 : 1));
+      const spawnDelay = (activeEvent === 'ambush' ? 0.85 : activeEvent === 'rage' ? 1.1 : 1.45) * balance.spawn * (dayPhase === 'night' ? 0.78 : 1);
+      if (insideHouseRef.current === null && spawnTimerRef.current <= 0 && enemiesRef.current.length < maxEnemies) {
+        spawnTimerRef.current = spawnDelay;
+        addEnemy(true);
+      }
+
+      if (activeEvent === 'starvation') hpRef.current -= dt * 0.85 * balance.enemyDamage;
+      music?.update(clamp(enemiesRef.current.length / maxEnemies, 0, 1), hpRef.current, !!activeEvent, inHloddev);
+      const dayAngle = dayTimeRef.current * Math.PI * 2 - Math.PI * 0.5;
+      const sunLift = Math.max(0, Math.sin(dayAngle));
+      const moonLift = Math.max(0, -Math.sin(dayAngle));
+      const daylight = clamp(0.12 + sunLift * 0.88, 0.12, 1);
+      renderer.toneMappingExposure = inHloddev ? 0.86 : 0.58 + daylight * 0.5;
+      hemi.intensity = inHloddev ? 0.72 : 0.22 + daylight * 0.72;
+      sun.intensity = inHloddev ? 2.7 : 0.45 + daylight * 4.3;
+      rimLight.intensity = inHloddev ? 1.05 : 0.42 + moonLift * 1.15;
+      const fogColor = activeVision === 'bloodmoon'
+        ? 0x6f2428
+        : activeVision === 'echo'
+          ? 0x9fd7bd
+          : activeVision === 'whiteout'
+            ? 0xe8edf0
+            : inHloddev ? 0x86dff2 : dayPhase === 'night' ? 0x182238 : dayPhase === 'dusk' ? 0x8e6b63 : dayPhase === 'dawn' ? 0xb08f76 : 0x9fb7c9;
+      scene.background = new THREE.Color(fogColor);
+      scene.fog = new THREE.Fog(
+        fogColor,
+        activeVision === 'whiteout' ? 8 : inHloddev ? 12 : activeEvent === 'storm' ? 20 : 42,
+        activeVision === 'bloodmoon' ? 150 : activeVision === 'echo' ? 118 : activeVision === 'whiteout' ? 70 : inHloddev ? 92 : activeEvent === 'storm' ? 82 : 245,
+      );
+      const shaderTime = performance.now() * 0.001;
+      for (const material of shaderMaterials) {
+        if (material.uniforms.uTime) material.uniforms.uTime.value = shaderTime;
+        if (material.uniforms.uFogColor) material.uniforms.uFogColor.value.setHex(fogColor);
+        if (material.uniforms.uMix) material.uniforms.uMix.value = activeVision ? 0.48 : inHloddev ? 0.62 : activeEvent === 'storm' ? 0.28 : 0.04;
+        if (material.uniforms.uFogNear) material.uniforms.uFogNear.value = activeVision === 'whiteout' ? 18 : inHloddev ? 40 : activeEvent === 'storm' ? 35 : 120;
+        if (material.uniforms.uFogFar) material.uniforms.uFogFar.value = activeVision ? 120 : inHloddev ? 130 : activeEvent === 'storm' ? 125 : 380;
+      }
+
+      const cameraTarget = playerRef.current.clone();
+      skyDome.position.copy(cameraTarget);
+      const sunArcY = Math.sin(dayAngle) * 78;
+      const sunArcX = Math.cos(dayAngle) * 74;
+      sun.position.set(cameraTarget.x + sunArcX, cameraTarget.y + sunArcY + 14, cameraTarget.z + 28);
+      sun.target.position.set(cameraTarget.x, cameraTarget.y, cameraTarget.z - 12);
+      sun.target.updateMatrixWorld();
+      if (document.pointerLockElement !== renderer.domElement && !keysRef.current.has('shift')) {
+        cameraYaw = lerpAngle(cameraYaw, playerYaw, dt * (currentSpeed > 1 ? 3.1 : 1.8));
+      }
+      const followForward = new THREE.Vector3(Math.sin(cameraYaw), 0, Math.cos(cameraYaw));
+      const followRight = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw));
+      const speedSway = Math.min(1, currentSpeed / PLAYER_SPEED);
+      const camBob = Math.sin(playerWalkTime * 0.65) * 0.18 * speedSway;
+      const shoulder = inHloddev ? 1.45 : 1.15;
+      const cameraDistance = inHloddev ? 11.5 : activeEvent === 'storm' ? 12.5 : 13.8;
+      const cameraHeight = inHloddev ? 6.7 : activeEvent === 'storm' ? 6.4 : 7.4;
+      const desiredCamera = cameraTarget
+        .clone()
+        .addScaledVector(followForward, -cameraDistance - speedSway * 1.35)
+        .addScaledVector(followRight, shoulder)
+        .add(new THREE.Vector3(0, cameraHeight + camBob, 0));
+      camera.position.lerp(
+        desiredCamera,
+        clamp(dt * 5.2, 0.04, 0.16),
+      );
+      const lookAhead = cameraTarget.clone().addScaledVector(followForward, 7.2 + speedSway * 3.2);
+      camera.lookAt(lookAhead.x, lookAhead.y + 1.6 + cameraPitch * 5.6, lookAhead.z);
+
+      const distance = Math.max(0, Math.round(((playerRef.current.z - FINISH_Z) / (START_Z - FINISH_Z)) * 100));
+      setHud({
+        hp: Math.max(0, Math.ceil(hpRef.current)),
+        score: scoreRef.current,
+        distance,
+        nextEvent: Math.max(0, Math.ceil(nextEventRef.current)),
+        event: eventKindRef.current ? EVENT_LABELS[eventKindRef.current] : '',
+        eventLeft: Math.max(0, Math.ceil(eventTimerRef.current)),
+        timeOfDay: dayPhaseLabel(dayPhase),
+        stamina: Math.round(staminaRef.current),
+        walkMode: walkModeLabel(walkModeRef.current),
+        difficulty: balance.label,
+        story: storyScore(storyFlagsRef.current),
+        weapon: WEAPONS[weaponRef.current].name,
+        dimension: inHloddev ? 'Хлоддев' : 'Степь',
+        heldItem: ITEM_LABELS[heldItemRef.current],
+        selectedSlot: selectedSlotRef.current,
+        teleport: Math.max(0, Math.ceil(teleportCooldownRef.current)),
+        dimensionLeft: Math.max(0, Math.ceil(dimensionTimerRef.current)),
+        hasKey: keyRef.current.collected,
+        hasCode: codeRef.current.collected,
+        keyNav: questNav(playerRef.current, keyRef.current),
+        codeNav: questNav(playerRef.current, codeRef.current),
+        inventory: [...inventoryRef.current],
+        hint: hintRef.current,
+      });
+
+      if (hpRef.current <= 0 && !deathTriggeredRef.current) {
+        deathTriggeredRef.current = true;
+        playJumpscareSfx();
+        setJumpscare(true);
+        setTimeout(() => {
+          setJumpscare(false);
+          const lostEnding = `Ending: Taken by the Steppe. Difficulty: ${DIFFICULTY[difficultyRef.current].label}. Story thread: ${storyScore(storyFlagsRef.current)}. Score: ${scoreRef.current}.`;
+          endingRef.current = lostEnding;
+          setEnding(lostEnding);
+          setPhase('lost');
+        }, 1550);
+      }
+      if (playerRef.current.z <= FINISH_Z + 8) {
+        const dialoguesLeft = houseNpcsRef.current.filter((npc) => !npc.visited).length;
+        if (keyRef.current.collected && codeRef.current.collected && dialoguesLeft === 0) {
+          endingRef.current = endingFor(storyFlagsRef.current, difficultyRef.current, scoreRef.current);
+          setEnding(endingRef.current);
+          setPhase('won');
+        } else {
+          playerRef.current.z = FINISH_Z + 13;
+          hintRef.current = 'Ворота закрыты. Нужны и ключ, и код.';
+          setTaunt('Настоящая крепость перед тобой, но без ключа и кода ты просто стучишься в стену.');
+          if (dialoguesLeft > 0) hintRef.current = `Р’РѕСЂРѕС‚Р° Р¶РґСѓС‚ РІСЃРµ РёСЃС‚РѕСЂРёРё. Р—Р°РІРµСЂС€Рё РґРёР°Р»РѕРіРё: ${dialoguesLeft}.`;
+          setTimeout(() => setTaunt(''), 4200);
+        }
+      }
+
+      renderer.render(scene, camera);
       raf = requestAnimationFrame(loop);
     };
+
     raf = requestAnimationFrame(loop);
 
-    return () => { stopped = true; cancelAnimationFrame(raf); window.removeEventListener('resize', resize); };
-  }, [screen]);
-
-  // ── Клавиатура / мышь ──
-  useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      if (k === 'escape') { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); onExit?.(); return; }
-      if (screen !== 'playing') return;
-      keysRef.current.add(k);
-      const w = worldRef.current; if (!w || w.result) return;
-      if (k === ' ') { e.preventDefault(); w.wantsAttack = true; }
-      else if (k === 'f') { if (countItem(w, 'medkit') && w.hp < w.maxHp) { removeOne(w, 'medkit'); w.hp = Math.min(w.maxHp, w.hp + 45); banner(w, '💊 +45 HP'); } }
-      else if (k === 'c') { if (countItem(w, 'torch')) { w.torch = !w.torch; banner(w, w.torch ? '🔥 Факел зажжён' : 'Факел потушен'); } else banner(w, 'Нет факела (скрафти в развалинах)'); }
-      else if (k === 'r') { banner(w, countItem(w, 'ammo') ? `🔁 Патронов: ${countItem(w, 'ammo')}` : 'Нет патронов'); }
-      else if (k === 'e') { if (w.nearRiddle >= 0) setRiddle(w.nearRiddle); }
-      else if (k >= '1' && k <= '9') { const i = Number(k) - 1; const sl = w.inv[i]; if (sl) { const m = ITEMS[sl.item]; if (m.kind === 'melee' || m.kind === 'ranged') { w.equipped = i; banner(w, `🗡️ ${m.name}`); } else if (m.kind === 'heal') { removeOne(w, sl.item); w.hp = Math.min(w.maxHp, w.hp + 45); banner(w, '💊 +45 HP'); } else if (m.kind === 'food') { removeOne(w, sl.item); w.hp = Math.min(w.maxHp, w.hp + 15); banner(w, '🍖 +15 HP'); } } }
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', resize);
+      window.removeEventListener('keydown', keyDown);
+      window.removeEventListener('keyup', keyUp);
+      window.removeEventListener('pointermove', pointerMove);
+      document.removeEventListener('pointerlockchange', pointerLockChange);
+      window.removeEventListener('pointerdown', pointerDown);
+      if (document.pointerLockElement === renderer.domElement) document.exitPointerLock?.();
+      music?.stop();
+      keysRef.current.clear();
+      renderer.dispose();
+      mount.innerHTML = '';
     };
-    const up = (e: KeyboardEvent) => { keysRef.current.delete(e.key.toLowerCase()); };
-    const mm = (e: MouseEvent) => { mouseRef.current.x = e.clientX; mouseRef.current.y = e.clientY; };
-    const mdn = (e: MouseEvent) => { mouseRef.current.down = true; const w = worldRef.current; if (w && !w.result && screen === 'playing') w.wantsAttack = true; e.preventDefault(); };
-    const mup = () => { mouseRef.current.down = false; };
-    window.addEventListener('keydown', down); window.addEventListener('keyup', up);
-    window.addEventListener('mousemove', mm); window.addEventListener('mousedown', mdn); window.addEventListener('mouseup', mup);
-    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('mousemove', mm); window.removeEventListener('mousedown', mdn); window.removeEventListener('mouseup', mup); };
-  }, [screen, onExit]);
+  }, [phase, onExit]);
 
-  // ════════ ЭКРАН ЗАСТАВКИ (постер) ════════
-  if (screen === 'intro') {
-    return (
-      <div id="qasqyr-root" style={{
-        position: 'fixed', inset: 0, zIndex: 9999,
-        overflow: 'hidden', color: '#e8e6e1',
-        background: '#050807',
-        display: 'flex', flexDirection: 'column'
-      }}>
-        {/* ── Постер ── */}
-        <div style={{
-          flex: '1 1 0', minHeight: 0, position: 'relative',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            position: 'absolute', inset: 0,
-            background: 'linear-gradient(180deg, #040706 0%, #08120d 35%, #0d1b11 65%, #040706 100%)'
-          }} />
-          <div style={{
-            position: 'absolute', inset: 0, zIndex: 1,
-            background: 'radial-gradient(ellipse 90% 80% at 50% 40%, transparent 25%, rgba(0,0,0,0.72) 100%)'
-          }} />
-          <div style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0, height: '38%', zIndex: 2,
-            background: 'linear-gradient(to top, rgba(4,6,5,0.92) 0%, transparent 100%)'
-          }} />
+  const start = () => {
+    reset();
+    setPhase('playing');
+  };
 
-          <svg
-            viewBox="0 0 500 700"
-            style={{
-              position: 'relative', zIndex: 3,
-              height: '100%', maxHeight: '100%',
-              width: 'auto', display: 'block',
-              filter: 'drop-shadow(0 12px 60px rgba(0,0,0,0.98))'
-            }}
-            preserveAspectRatio="xMidYMid meet"
-          >
-            {/* Степная растительность */}
-            <g fill="#070e09" opacity="0.85">
-              <path d="M25 700 Q18 570 10 460 Q13 456 16 460 Q24 570 30 700Z" />
-              <path d="M48 700 Q55 595 66 488 Q69 485 72 488 Q65 595 68 700Z" />
-              <path d="M10 700 Q4 630 -2 520 Q0 517 3 520 Q10 630 14 700Z" />
-              <path d="M462 700 Q470 570 478 460 Q481 456 484 460 Q478 570 482 700Z" />
-              <path d="M445 700 Q438 595 426 488 Q423 485 420 488 Q427 595 430 700Z" />
-              <path d="M478 700 Q484 630 492 520 Q494 517 497 520 Q492 630 487 700Z" />
-            </g>
-            <g stroke="#09120b" strokeWidth="4" fill="none" opacity="0.55">
-              <path d="M78 0 Q85 90 81 180 Q77 240 85 310" />
-              <path d="M83 130 Q65 162 49 152" />
-              <path d="M82 185 Q99 210 114 200" />
-              <path d="M416 0 Q409 95 413 195 Q417 255 409 320" />
-              <path d="M411 148 Q429 172 445 162" />
-              <path d="M410 210 Q393 233 377 223" />
-            </g>
+  const exit = () => {
+    setPhase('intro');
+    onExit?.();
+  };
 
-            {/* ЕРЛАН — высокий крепкий, чуть сзади справа */}
-            <g fill="#0c0e0c">
-              <ellipse cx="292" cy="118" rx="33" ry="37" />
-              <path d="M271 152 Q272 174 292 174 Q312 174 313 152Z" />
-              <path d="M238 178
-                Q228 252 224 355 Q220 458 224 588
-                L269 588 Q273 518 280 458 Q286 408 292 384
-                Q298 408 304 458 Q311 518 315 588
-                L360 588 Q364 458 360 355 Q356 252 346 178
-                Q319 168 292 165 Q265 168 238 178Z" />
-              <path d="M238 190 L190 358 L177 354 L174 374 L206 382 L221 364 L251 205Z" />
-              <path d="M346 190 L384 328 L372 332 L342 205Z" />
-              <path d="M236 584 L224 700 L251 700 L267 640 L280 700 L304 700 L317 640 L332 700 L359 700 L347 584Z" />
-              <rect x="160" y="362" width="94" height="11" rx="4" transform="rotate(4 208 367)" />
-            </g>
+  const handleDialogChoice = (choice: NpcChoice) => {
+    if (dialog && dialog.step < 2) {
+      storyFlagsRef.current.lore += 1;
+      scoreRef.current += 3;
+      hintRef.current = choice.reply;
+      setDialog({ ...dialog, step: dialog.step + 1, lastReply: choice.reply });
+      setHud((h) => ({
+        ...h,
+        score: scoreRef.current,
+        hint: hintRef.current,
+      }));
+      return;
+    }
 
-            {/* БАХА — пониже стройнее, чуть впереди слева */}
-            <g fill="#101310">
-              <ellipse cx="175" cy="200" rx="25" ry="28" transform="rotate(-3 175 200)" />
-              <path d="M151 224 Q153 241 175 243 Q197 241 199 224 Q187 231 175 231 Q163 231 151 224Z" />
-              <path d="M163 228 Q163 247 175 247 Q187 247 187 228Z" />
-              <path d="M141 250
-                Q134 318 132 408 Q130 499 134 604
-                L163 604 Q166 544 171 490 Q175 452 179 432
-                Q183 452 187 490 Q192 544 196 604
-                L225 604 Q229 499 227 408 Q225 318 218 250
-                Q199 242 179 239 Q159 242 141 250Z" />
-              <path d="M141 262 L108 390 L119 394 L151 276Z" />
-              <path d="M218 262 L247 370 L257 365 L228 276Z" />
-              <path d="M143 600 L134 700 L158 700 L172 644 L186 700 L210 700 L222 600Z" />
-            </g>
+    const activeNpcId = dialog?.npc.id;
+    if (choice.effect === 'heal') {
+      storyFlagsRef.current.trust += 2;
+      hpRef.current = Math.min(DIFFICULTY[difficultyRef.current].hp, hpRef.current + 30);
+      scoreRef.current += 10;
+    } else if (choice.effect === 'medkit') {
+      storyFlagsRef.current.trust += 1;
+      inventoryRef.current = addInventoryItem(inventoryRef.current, 'medkit');
+      scoreRef.current += 8;
+    } else if (choice.effect === 'weapon') {
+      storyFlagsRef.current.risk += 1;
+      inventoryRef.current = addInventoryItem(inventoryRef.current, 'sabre');
+      weaponRef.current = 'sabre';
+      heldItemRef.current = 'sabre';
+      selectedSlotRef.current = Math.max(0, inventoryRef.current.findIndex((item) => item.kind === 'sabre'));
+      scoreRef.current += 12;
+    } else if (choice.effect === 'damage') {
+      storyFlagsRef.current.risk += 2;
+      storyFlagsRef.current.cruelty += 1;
+      hpRef.current = Math.max(5, hpRef.current - 24);
+      scoreRef.current = Math.max(0, scoreRef.current - 8);
+    } else if (choice.effect === 'steal') {
+      storyFlagsRef.current.risk += 2;
+      storyFlagsRef.current.cruelty += 1;
+      const target = inventoryRef.current.find((item) => item.kind === 'crystal' || item.kind === 'medkit');
+      if (target) {
+        target.count -= 1;
+        if (target.count <= 0) inventoryRef.current = inventoryRef.current.filter((item) => item !== target);
+      } else {
+        scoreRef.current = Math.max(0, scoreRef.current - 20);
+      }
+    } else if (choice.effect === 'ambush') {
+      storyFlagsRef.current.risk += 3;
+      exitHouseBurstRef.current = 10 + Math.floor(Math.random() * 5);
+      scoreRef.current = Math.max(0, scoreRef.current - 5);
+    } else {
+      storyFlagsRef.current.lore += 2;
+      scoreRef.current += 5;
+    }
 
-            {/* Название — двустрочное, постерный стиль */}
-            <text x="250" y="608" textAnchor="middle" fill="#f0ece4"
-              fontSize="88" fontWeight="900"
-              fontFamily="Georgia, 'Times New Roman', serif" letterSpacing="10">
-              ҚАС
-            </text>
-            <text x="250" y="690" textAnchor="middle" fill="#f0ece4"
-              fontSize="88" fontWeight="900"
-              fontFamily="Georgia, 'Times New Roman', serif" letterSpacing="10">
-              ҚЫР
-            </text>
-          </svg>
+    if (activeNpcId !== undefined) {
+      const npc = houseNpcsRef.current.find((item) => item.id === activeNpcId);
+      if (npc) npc.visited = true;
+    }
+    if (choice.effect !== 'ambush') exitHouseBurstRef.current = 4 + Math.floor(Math.random() * 5);
+    insideHouseRef.current = null;
+    hintRef.current = choice.reply;
+    setTaunt(choice.reply);
+    setTimeout(() => setTaunt(''), 4200);
+    setDialog(null);
+    setHud((h) => ({
+      ...h,
+      hp: Math.max(0, Math.ceil(hpRef.current)),
+      score: scoreRef.current,
+      story: storyScore(storyFlagsRef.current),
+      weapon: WEAPONS[weaponRef.current].name,
+      heldItem: ITEM_LABELS[heldItemRef.current],
+      selectedSlot: selectedSlotRef.current,
+      inventory: [...inventoryRef.current],
+      hint: hintRef.current,
+    }));
+  };
 
-          {/* Подзаголовок поверх постера */}
-          <div style={{
-            position: 'absolute', bottom: 14, left: 0, right: 0, zIndex: 4,
-            textAlign: 'center',
-            fontSize: 'clamp(10px, 1.6vw, 14px)',
-            letterSpacing: '0.38em',
-            color: '#5a8a60',
-            fontFamily: 'Georgia, serif',
-            textTransform: 'uppercase',
-            opacity: 0.9
-          }}>
-            Казахский постапокалипсис · 1873
-          </div>
-        </div>
-
-        {/* ── Выбор персонажа + кнопка ── */}
-        <div style={{
-          background: '#050807',
-          borderTop: '1px solid #182018',
-          padding: '12px 16px 20px',
-          textAlign: 'center', flexShrink: 0
-        }}>
-          <p style={{ margin: '0 0 8px', fontSize: 11, letterSpacing: '0.22em', textTransform: 'uppercase', opacity: 0.5, fontFamily: 'system-ui', fontWeight: 700 }}>— Выбери героя —</p>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12, justifyContent: 'center' }}>
-            {(Object.keys(CHARACTERS) as CharacterId[]).map((id) => {
-              const c = CHARACTERS[id]; const sel = chosen === id;
-              return (
-                <button key={id} onClick={() => setChosen(id)} style={{
-                  flex: '0 1 190px',
-                  border: `2px solid ${sel ? '#5a8a5a' : '#182018'}`,
-                  borderRadius: 8, padding: '10px 12px', cursor: 'pointer',
-                  color: '#e8e6e1', display: 'flex', flexDirection: 'column',
-                  gap: 2, alignItems: 'center', textAlign: 'center',
-                  background: sel ? 'rgba(90,138,90,0.14)' : 'rgba(4,6,5,0.85)',
-                  fontFamily: 'system-ui'
-                }}>
-                  <div style={{ fontSize: 26 }}>{c.emoji}</div>
-                  <div style={{ fontWeight: 800, fontSize: 14 }}>{c.name}</div>
-                  <div style={{ fontSize: 11, opacity: 0.65, lineHeight: 1.3 }}>{c.perk}</div>
-                </button>
-              );
-            })}
-          </div>
-          <button onClick={() => startGame(chosen)} style={{
-            background: 'transparent', color: '#f0ece4',
-            border: '2px solid #4e7c50', borderRadius: 3,
-            padding: '12px 44px', fontSize: 14, fontWeight: 800,
-            letterSpacing: '0.35em', cursor: 'pointer',
-            textTransform: 'uppercase', fontFamily: 'system-ui',
-            marginBottom: 6
-          }}>▶  ИГРАТЬ</button>
-          <p style={{ fontSize: 10, opacity: 0.3, marginTop: 6, fontFamily: 'system-ui', lineHeight: 1.4 }}>
-            WASD — движение · мышь — прицел · ЛКМ / Space — атака · Shift — красться · F — лечиться · C — факел · 1–9 — инвентарь · Esc — выход
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ════════ ИГРА / ФИНАЛ ════════
-  const c = CHARACTERS[chosen];
   return (
-    <div id="qasqyr-root" style={{ ...overlay, cursor: screen === 'playing' ? 'crosshair' : 'default' }}>
-      <canvas ref={canvasRef} style={{ display: 'block' }} />
-      <button onClick={() => { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); onExit?.(); }}
-        style={exitBtn}>✕ Выход (Esc)</button>
+    <div style={styles.root}>
+      {phase === 'playing' && <div ref={mountRef} style={styles.mount} />}
+      {phase === 'won' && <ZombieCongratsPhoto score={hud.score} />}
 
-      {jumpscare && (
+      <button type="button" onClick={exit} style={styles.exit}>Выйти</button>
+
+      {phase === 'playing' && (
         <>
-          <style>{`
-            @keyframes js-bg {
-              0%   { background:#aa2200; }
-              6%   { background:#ff3300; }
-              18%  { background:#880000; }
-              45%  { background:#330000; }
-              100% { background:#000000; }
-            }
-            @keyframes js-slam {
-              0%   { transform:scale(1.9); }
-              8%   { transform:scale(0.96); }
-              15%  { transform:scale(1.04); }
-              22%  { transform:scale(1); }
-              100% { transform:scale(1); }
-            }
-            @keyframes js-shake {
-              0%   { transform:translate(0,0); }
-              10%  { transform:translate(-20px,12px); }
-              20%  { transform:translate(16px,-14px); }
-              30%  { transform:translate(-12px,18px); }
-              40%  { transform:translate(14px,-8px); }
-              55%  { transform:translate(-6px,8px); }
-              70%  { transform:translate(5px,-5px); }
-              100% { transform:translate(0,0); }
-            }
-            @keyframes js-fade {
-              0%   { opacity:1; }
-              65%  { opacity:1; }
-              100% { opacity:0; }
-            }
-            .js-overlay { animation: js-bg 2.8s ease-out forwards; }
-            .js-slam    { animation: js-slam 0.2s ease-out forwards, js-shake 0.42s ease-in-out, js-fade 2.8s ease-in-out forwards; }
-          `}</style>
-          <div className="js-overlay" style={{
-            position:'absolute', inset:0, zIndex:9998, overflow:'hidden',
-            display:'flex', alignItems:'center', justifyContent:'center'
-          }}>
-            <div className="js-slam" style={{ width:'100%', height:'100%' }}>
-              <svg viewBox="0 0 400 400" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
-                <defs>
-                  <radialGradient id="fur" cx="50%" cy="42%">
-                    <stop offset="0%"   stopColor="#d98c2c"/>
-                    <stop offset="40%"  stopColor="#bf7218"/>
-                    <stop offset="78%"  stopColor="#8a5010"/>
-                    <stop offset="100%" stopColor="#3e1e06"/>
-                  </radialGradient>
-                  <radialGradient id="vign" cx="50%" cy="50%">
-                    <stop offset="45%"  stopColor="#000000" stopOpacity="0"/>
-                    <stop offset="100%" stopColor="#000000" stopOpacity="0.82"/>
-                  </radialGradient>
-                  <radialGradient id="glow" cx="50%" cy="44%">
-                    <stop offset="0%"   stopColor="#b06010" stopOpacity="0.35"/>
-                    <stop offset="100%" stopColor="#000000" stopOpacity="0"/>
-                  </radialGradient>
-                </defs>
-
-                {/* Фон */}
-                <rect width="400" height="400" fill="#050302"/>
-                <rect width="400" height="400" fill="url(#glow)"/>
-
-                {/* Голова — большой овал, выходит за края */}
-                <ellipse cx="200" cy="190" rx="235" ry="250" fill="url(#fur)"/>
-
-                {/* Верхняя тень (лоб) */}
-                <ellipse cx="200" cy="28"  rx="250" ry="140" fill="#030201" opacity="0.7"/>
-
-                {/* Морда — светлее */}
-                <ellipse cx="200" cy="308" rx="115" ry="95"  fill="#c88c38"/>
-
-                {/* Тень под мордой */}
-                <ellipse cx="200" cy="420" rx="270" ry="170" fill="#030201" opacity="0.85"/>
-
-                {/* Глазницы */}
-                <ellipse cx="126" cy="192" rx="62" ry="64"   fill="#040202"/>
-                <ellipse cx="274" cy="192" rx="62" ry="64"   fill="#040202"/>
-
-                {/* Ободок глаз */}
-                <ellipse cx="126" cy="192" rx="66" ry="68"   fill="none" stroke="#5c380e" strokeWidth="4" opacity="0.5"/>
-                <ellipse cx="274" cy="192" rx="66" ry="68"   fill="none" stroke="#5c380e" strokeWidth="4" opacity="0.5"/>
-
-                {/* Блик — белое пятно сверху-слева (как на фото) */}
-                <ellipse cx="108" cy="171" rx="14" ry="16"   fill="#e8e4dc" opacity="0.88"/>
-                <ellipse cx="256" cy="171" rx="14" ry="16"   fill="#e8e4dc" opacity="0.88"/>
-
-                {/* Переносица */}
-                <ellipse cx="200" cy="262" rx="28" ry="18"   fill="#7a4810" opacity="0.55"/>
-
-                {/* Ноздри */}
-                <ellipse cx="188" cy="302" rx="10" ry="7"    fill="#3a1c06" opacity="0.8"/>
-                <ellipse cx="212" cy="302" rx="10" ry="7"    fill="#3a1c06" opacity="0.8"/>
-
-                {/* Виньетка по краям */}
-                <rect width="400" height="400" fill="url(#vign)"/>
-              </svg>
-            </div>
+          <div style={styles.hud}>
+            <div style={styles.stat}><b>HP</b><span>{hud.hp}</span></div>
+            <div style={styles.stat}><b>Time</b><span>{hud.timeOfDay}</span></div>
+            <div style={styles.stat}><b>Move</b><span>{hud.walkMode}</span></div>
+            <div style={styles.stat}><b>Stamina</b><span>{hud.stamina}</span></div>
+            <div style={styles.stat}><b>Difficulty</b><span>{hud.difficulty}</span></div>
+            <div style={styles.stat}><b>Story</b><span>{hud.story}</span></div>
+            <div style={styles.stat}><b>Очки</b><span>{hud.score}</span></div>
+            <div style={styles.stat}><b>Оружие</b><span>{hud.weapon}</span></div>
+            <div style={styles.stat}><b>Измерение</b><span>{hud.dimensionLeft > 0 ? `${hud.dimension} ${hud.dimensionLeft}с` : hud.dimension}</span></div>
+            <div style={styles.stat}><b>Space</b><span>{hud.teleport > 0 ? `${hud.teleport}с` : 'Хлоддев'}</span></div>
+            <div style={styles.stat}><b>{hud.event || 'Ивент'}</b><span>{hud.event ? `${hud.eventLeft}с` : `${hud.nextEvent}с`}</span></div>
+            <div style={styles.hint}>{hud.hint}</div>
           </div>
+
+          <div style={styles.questPanel}>
+            <QuestArrow label="Ключ" done={hud.hasKey} nav={hud.keyNav} />
+            <QuestArrow label="Код" done={hud.hasCode} nav={hud.codeNav} />
+            <div style={styles.fortressDistance}>Крепость: {hud.distance}% пути</div>
+          </div>
+
+          <InventoryPanel items={hud.inventory} selectedSlot={hud.selectedSlot} />
+
+          {taunt && <div style={styles.taunt}>{taunt}</div>}
+          {dialog && <DialogPanel dialog={dialog} onChoose={handleDialogChoice} />}
+          {jumpscare && <ZombieScreamer />}
+          {vision && <div style={{ ...styles.vision, ...(vision === 'bloodmoon' ? styles.visionBlood : vision === 'echo' ? styles.visionEcho : styles.visionWhite) }} />}
         </>
       )}
 
-      {riddle !== null && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 9990, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.82)' }}>
-          <div style={{ background: '#0e1008', border: '2px solid #6b9a40', borderRadius: 16, padding: '28px 32px', width: 'min(500px,92vw)', textAlign: 'center', color: '#e8e6e1', fontFamily: 'system-ui' }}>
-            <div style={{ fontSize: 36, marginBottom: 8 }}>{riddle === 0 ? '📜' : '🗝️'}</div>
-            <h2 style={{ margin: '0 0 6px', color: '#d9c060', fontSize: 18 }}>Загадка {riddle + 1} из 2</h2>
-            <p style={{ color: '#b0c090', fontSize: 13, margin: '0 0 4px' }}>Реши загадку, получи {riddle === 0 ? 'КОД К ВОРОТАМ' : 'ОТМЫЧКУ'}. Неверный ответ — −20 HP.</p>
-            <p style={{ fontSize: 16, lineHeight: 1.6, margin: '16px 0 20px', color: '#f0ece0' }}>{RIDDLES[riddle].question}</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(RIDDLES[riddle].options as readonly string[]).map((opt, i) => (
-                <button key={i} onClick={() => handleRiddleAnswer(riddle, i)} style={{ background: '#1a2010', border: '1px solid #4a6a28', borderRadius: 8, padding: '11px 16px', color: '#d0e0a0', fontSize: 15, cursor: 'pointer', textAlign: 'left' }}>
-                  {opt}
+      {phase !== 'playing' && (
+        <section style={styles.panel}>
+          <p style={styles.eyebrow}>QASQYR 3D</p>
+          <h2 style={styles.title}>
+            {phase === 'won' ? 'Крепость открыта' : phase === 'lost' ? 'Степь тебя остановила' : '3D survival в степи'}
+          </h2>
+          <p style={styles.text}>
+            {phase === 'won'
+              ? `Победа. Ты нашел ключ и код. Итог: ${hud.score} очков.`
+              : phase === 'lost'
+                ? `Поражение. Итог: ${hud.score} очков.`
+                : 'Найди ключ и код от крепости, собирай оружие и аптечки, отбивайся от плотных волн врагов. Стрелки покажут путь к квестовым предметам.'}
+          </p>
+          {ending && <p style={styles.endingText}>{ending}</p>}
+          {phase === 'intro' && (
+            <div style={styles.difficultyGrid}>
+              {(['story', 'survival', 'nightmare'] as Difficulty[]).map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  onClick={() => setDifficulty(level)}
+                  style={difficulty === level ? styles.difficultySelected : styles.difficultyButton}
+                >
+                  {DIFFICULTY[level].label}
                 </button>
               ))}
             </div>
-            <button onClick={() => setRiddle(null)} style={{ marginTop: 14, background: 'transparent', border: '1px solid #444', borderRadius: 8, padding: '8px 24px', color: '#666', fontSize: 13, cursor: 'pointer' }}>
-              Закрыть
-            </button>
-          </div>
-        </div>
-      )}
-
-      {screen === 'over' && result && (
-        <div style={overPanel}>
-          <div style={{ fontSize: 40, marginBottom: 8 }}>{result.kind === 'win' ? '🏰' : '💀'}</div>
-          <h2 style={{ margin: '0 0 8px' }}>{result.title}</h2>
-          <p style={{ opacity: 0.85, lineHeight: 1.5, marginBottom: 20 }}>{result.text}</p>
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-            <button onClick={() => startGame(chosen)} style={playBtn}>↺ Играть снова за {c.name}</button>
-            <button onClick={() => setScreen('intro')} style={{ ...playBtn, background: 'transparent', border: '1px solid #555', color: '#ccc' }}>Меню</button>
-          </div>
-        </div>
+          )}
+          <div style={styles.controls}>WASD - движение · мышь - прицел · клик - удар · Space - Хлоддев · Esc - выход</div>
+          <button type="button" onClick={start} style={styles.play}>
+            {phase === 'intro' ? 'Играть' : 'Еще раз'}
+          </button>
+        </section>
       )}
     </div>
   );
 }
 
-// ════════════════════════════ ОБНОВЛЕНИЕ МИРА ════════════════════════════
-function update(w: World, dt: number, keys: Set<string>, mouse: { x: number; y: number; down: boolean }, finish: (k: 'win' | 'lose') => void) {
-  // время суток
-  w.time += dt / 90;
-  if (w.time >= 1) { w.time -= 1; w.day += 1; banner(w, `📅 День ${w.day}`); }
-  const night = w.time < 0.22 || w.time > 0.74;
-
-  // ── playTime и заморозка ──
-  w.playTime += dt;
-  w.frozenTimer = Math.max(0, w.frozenTimer - dt);
-
-  // ── Система ивентов ──
-  if (w.eventId > 0) {
-    w.eventTimer -= dt;
-    // обратный отсчёт в баннере
-    if (w.eventTimer > 0 && w.eventTimer <= 10) {
-      const sec = Math.ceil(w.eventTimer);
-      if (sec !== Math.ceil(w.eventTimer + dt)) banner(w, `⏱️ ${sec}с...`);
-    }
-    if (w.eventTimer <= 0) {
-      const ended = w.eventId;
-      if (ended === 1) {
-        // хардкор → сразу туннель
-        w.tunnelChaser = { x: w.px, y: w.py - 720, speed: WALK, r: 24, hitCd: 0 };
-        w.eventId = 2; w.eventTimer = 30;
-        banner(w, '🚇 ТУННЕЛЬ! Беги от монстра!');
-      } else {
-        if (ended === 5) w.berserkMult = 1;
-        w.tunnelChaser = null;
-        w.eventId = 0; w.nextEventIn = 90;
-        const msgs: Record<number, string> = { 2: '✅ Вырвался из туннеля!', 3: '✅ Буря стихла!', 4: '✅ Нашествие отбито!', 5: '✅ Враги успокоились.' };
-        banner(w, msgs[ended] ?? '✅ Испытание пройдено!');
-      }
-    }
-  }
-  if (w.eventId === 0) {
-    w.nextEventIn -= dt;
-    if (w.nextEventIn <= 0) {
-      w.eventCount += 1;
-      const evOrder = [1, 3, 4, 5, 3, 4, 5, 4, 5];
-      const ev = evOrder[Math.min(w.eventCount - 1, evOrder.length - 1)];
-      w.eventId = ev;
-      if (ev === 1) {
-        w.eventTimer = 30;
-        // изъять всё кроме еды и ножа
-        for (let i = 0; i < 9; i++) {
-          const sl = w.inv[i];
-          if (sl && sl.item !== 'food' && sl.item !== 'knife') { w.inv[i] = null; if (w.equipped === i) w.equipped = null; }
-        }
-        banner(w, '⚠️ ХАРДКОР! Снаряжение изъято — выживи 30 секунд!');
-      } else if (ev === 3) {
-        w.eventTimer = 25;
-        banner(w, '🌪️ СТЕПНАЯ БУРЯ! Скорость снижена на 60%!');
-      } else if (ev === 4) {
-        w.eventTimer = 25;
-        const d = ENEMY_DEFS['alyp'];
-        for (let i = 0; i < 15; i++) {
-          const ang = (i / 15) * Math.PI * 2;
-          w.enemies.push({ x: w.px + Math.cos(ang) * 660, y: w.py + Math.sin(ang) * 660, hp: d.hp, maxHp: d.hp, r: d.r, kind: 'alyp', speed: d.speed, dmg: d.dmg, hitFlash: 0 });
-        }
-        banner(w, '👹 НАШЕСТВИЕ! Орда Алыпов атакует!');
-      } else if (ev === 5) {
-        w.eventTimer = 30;
-        w.berserkMult = 2.2;
-        banner(w, '🔴 БЕРСЕРК! Враги вдвое быстрее!');
-      }
-    }
-  }
-
-  // движение (учитываем заморозку и бурю)
-  w.sneaking = keys.has('shift');
-  const stormMult = w.eventId === 3 ? 0.4 : 1;
-  const sp = w.frozenTimer > 0 ? 0 : (w.sneaking ? SNEAK : WALK) * stormMult;
-  let dx = 0, dy = 0;
-  if (w.frozenTimer <= 0) {
-    if (keys.has('w')) dy -= 1; if (keys.has('s')) dy += 1;
-    if (keys.has('a')) dx -= 1; if (keys.has('d')) dx += 1;
-  }
-  const len = Math.hypot(dx, dy) || 1;
-  w.px += (dx / len) * sp * dt;
-  w.py += (dy / len) * sp * dt;
-  w.px = Math.max(40, Math.min(WORLD_W - 40, w.px));
-  w.py = Math.max(60, Math.min(WORLD_H - 60, w.py));
-  if (dx || dy) w.facing = Math.atan2(dy, dx);
-
-  // прицел к мыши
-  w.aim = Math.atan2(mouse.y - window.innerHeight / 2, mouse.x - window.innerWidth / 2);
-
-  // победа — нужны код, отмычка и ключ
-  if (w.py <= FORTRESS_Y) {
-    const hasCode = countItem(w, 'code_scroll') > 0;
-    const hasLock = countItem(w, 'lockpick') > 0;
-    const hasKey  = countItem(w, 'fortress_key') > 0;
-    if (hasCode && hasLock && hasKey) { finish('win'); return; }
-    w.py = FORTRESS_Y + 95;
-    if (!w.fortressKeyLoot && !hasKey) {
-      const kx = 400 + Math.random() * (WORLD_W - 800);
-      const ky = 2500 + Math.random() * (WORLD_H - 5000);
-      w.fortressKeyLoot = { x: kx, y: ky };
-      w.loot.push({ x: kx, y: ky, item: 'fortress_key', r: 14 });
-      banner(w, '🔑 Ворота не открыть... КЛЮЧ вылетел в степь! Стрелка укажет путь.');
-    } else {
-      const missing: string[] = [];
-      if (!hasCode) missing.push('КОД 📜');
-      if (!hasLock)  missing.push('ОТМЫЧКУ 🗝️');
-      if (!hasKey)   missing.push('КЛЮЧ 🔑');
-      if (missing.length) banner(w, `🔒 Нужны: ${missing.join(', ')}`);
-    }
-  }
-
-  // ложные крепости
-  if (w.fakeFortressMock > 0) w.fakeFortressMock -= dt;
-  for (const ff of FAKE_FORTRESS_DEFS) {
-    if (Math.hypot(w.px - ff.x, w.py - ff.y) < 200 && w.fakeFortressMock <= 0) {
-      w.fakeFortressMock = 8;
-      banner(w, MOCK_MSGS[ff.mockIdx]);
-      break;
-    }
-  }
-
-  // загадки — подсказка при приближении
-  w.nearRiddle = -1;
-  for (let i = 0; i < RIDDLE_DEFS.length; i++) {
-    if (!w.riddleSolved[i] && Math.hypot(w.px - RIDDLE_DEFS[i].x, w.py - RIDDLE_DEFS[i].y) < 88) {
-      w.nearRiddle = i;
-      if (w.bannerT <= 0.6) banner(w, `🔍 [E] — прочитать загадку (${i === 0 ? 'даёт КОД 📜' : 'даёт ОТМЫЧКУ 🗝️'})`);
-      break;
-    }
-  }
-
-  // атака
-  w.attackCd = Math.max(0, w.attackCd - dt);
-  w.attackTimer = Math.max(0, w.attackTimer - dt);
-  if (w.wantsAttack && w.attackCd === 0) {
-    w.wantsAttack = false;
-    const wepId = w.equipped != null && w.inv[w.equipped] ? w.inv[w.equipped]!.item : null;
-    const wep = wepId ? ITEMS[wepId] : null;
-    if (wep && wep.ranged) {
-      if (countItem(w, 'ammo') > 0) {
-        removeOne(w, 'ammo');
-        w.bullets.push({ x: w.px, y: w.py, vx: Math.cos(w.aim) * 760, vy: Math.sin(w.aim) * 760, life: 1.2 });
-        w.attackCd = 0.32;
-      } else { banner(w, 'Нет патронов! (R)'); w.attackCd = 0.2; }
-    } else {
-      // ближний бой — взмах
-      w.attackTimer = 0.18; w.attackCd = 0.36;
-      const reach = (wepId === 'club' ? 78 : 62);
-      const dmg = (wep?.damage ?? 8) * (w.char === 'erlan' ? 1.4 : 1) + 4;
-      for (const e of w.enemies) {
-        const a = Math.atan2(e.y - w.py, e.x - w.px);
-        let da = Math.abs(a - w.aim); if (da > Math.PI) da = 2 * Math.PI - da;
-        if (Math.hypot(e.x - w.px, e.y - w.py) < reach + e.r && da < 1.1) { e.hp -= dmg; e.hitFlash = 0.12; }
-      }
-    }
-  }
-  w.wantsAttack = false;
-
-  // пули
-  for (const b of w.bullets) {
-    b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
-    for (const e of w.enemies) {
-      if (e.hp > 0 && Math.hypot(e.x - b.x, e.y - b.y) < e.r + 4) { e.hp -= 32; e.hitFlash = 0.12; b.life = 0; break; }
-    }
-  }
-  w.bullets = w.bullets.filter((b) => b.life > 0);
-
-  // спавн врагов
-  w.spawnTimer -= dt;
-  const cap = w.eventId === 1 ? 80 : (night ? 60 : 45);
-  const spawnRate = w.eventId === 1 ? 0.09 : (night ? 0.2 : 0.33);
-  if (w.spawnTimer <= 0 && w.enemies.length < cap) {
-    w.spawnTimer = spawnRate;
-    const ang = Math.random() * Math.PI * 2;
-    const dist = 560 + Math.random() * 160;
-    const ex = w.px + Math.cos(ang) * dist;
-    const ey = w.py + Math.sin(ang) * dist;
-    let kind: EnemyKind;
-    const roll = Math.random();
-    if (night && roll < 0.45) kind = 'wolf';
-    else if (roll < 0.4) kind = 'shala';
-    else if (roll < 0.62) kind = 'sokyr';
-    else if (roll < 0.8) kind = 'jarylys';
-    else if (roll < 0.92) kind = 'wolf';
-    else kind = 'alyp';
-    const d = ENEMY_DEFS[kind];
-    w.enemies.push({ x: ex, y: ey, hp: d.hp, maxHp: d.hp, r: d.r, kind, speed: d.speed, dmg: d.dmg, hitFlash: 0 });
-  }
-
-  // ИИ врагов — ВСЕГДА идут на героя (или на ближайшего союзника, если он ближе)
-  for (const e of w.enemies) {
-    e.hitFlash = Math.max(0, e.hitFlash - dt);
-    // цель: герой, либо ближайший союзник в пределах 220px
-    let tx = w.px, ty = w.py;
-    let best = Math.hypot(w.px - e.x, w.py - e.y);
-    for (const al of w.allies) {
-      const d = Math.hypot(al.x - e.x, al.y - e.y);
-      if (d < best && d < 240) { best = d; tx = al.x; ty = al.y; }
-    }
-    const a = Math.atan2(ty - e.y, tx - e.x);
-    e.x += Math.cos(a) * e.speed * w.berserkMult * dt;
-    e.y += Math.sin(a) * e.speed * w.berserkMult * dt;
-
-    // урон герою при касании
-    const dp = Math.hypot(w.px - e.x, w.py - e.y);
-    if (dp < e.r + 16) {
-      w.hp -= e.dmg * dt;
-      w.hurtFlash = 0.25;
-      const ba = Math.atan2(e.y - w.py, e.x - w.px);
-      e.x += Math.cos(ba) * 120 * dt; e.y += Math.sin(ba) * 120 * dt; // лёгкий отскок
-    }
-    // урон союзникам при касании
-    for (const al of w.allies) {
-      if (Math.hypot(al.x - e.x, al.y - e.y) < e.r + al.r) al.hp -= e.dmg * 0.6 * dt;
-    }
-  }
-
-  // ── ПОДМОГА: приходит время от времени и дерётся ──
-  w.allyTimer -= dt;
-  if (w.allyTimer <= 0 && w.allies.length < 3) {
-    w.allyTimer = 22 + Math.random() * 12;
-    const t = ALLY_POOL[Math.floor(Math.random() * ALLY_POOL.length)];
-    const ang = Math.random() * Math.PI * 2;
-    w.allies.push({ x: w.px + Math.cos(ang) * 520, y: w.py + Math.sin(ang) * 520, hp: t.hp, maxHp: t.hp, r: 15, cd: 0, name: t.name, emoji: t.emoji });
-    banner(w, `⛑️ Подмога! ${t.emoji} ${t.name} спешит на помощь`);
-  }
-  for (const al of w.allies) {
-    // держаться рядом с героем
-    const dh = Math.hypot(w.px - al.x, w.py - al.y);
-    if (dh > 120) { const a = Math.atan2(w.py - al.y, w.px - al.x); al.x += Math.cos(a) * 175 * dt; al.y += Math.sin(a) * 175 * dt; }
-    // стрелять по ближайшему врагу
-    al.cd = Math.max(0, al.cd - dt);
-    if (al.cd === 0) {
-      let target: Enemy | null = null; let bd = 320;
-      for (const e of w.enemies) { const d = Math.hypot(e.x - al.x, e.y - al.y); if (d < bd) { bd = d; target = e; } }
-      if (target) {
-        const a = Math.atan2(target.y - al.y, target.x - al.x);
-        w.bullets.push({ x: al.x, y: al.y, vx: Math.cos(a) * 720, vy: Math.sin(a) * 720, life: 1.0 });
-        al.cd = 0.7;
-      }
-    }
-  }
-  // павшая подмога
-  w.allies = w.allies.filter((al) => { if (al.hp <= 0) { banner(w, `🪦 ${al.name} пал в бою...`); return false; } return true; });
-
-  // ── Туннельный преследователь ──
-  if (w.tunnelChaser) {
-    const tc = w.tunnelChaser;
-    tc.hitCd = Math.max(0, tc.hitCd - dt);
-    const ang = Math.atan2(w.py - tc.y, w.px - tc.x);
-    tc.x += Math.cos(ang) * tc.speed * dt;
-    tc.y += Math.sin(ang) * tc.speed * dt;
-    if (Math.hypot(w.px - tc.x, w.py - tc.y) < tc.r + 18 && tc.hitCd <= 0) {
-      w.frozenTimer = 1.2;
-      w.hp -= 28;
-      w.hurtFlash = 0.5;
-      tc.hitCd = 1.8;
-      banner(w, '❄️ Монстр поймал тебя! −28 HP');
-    }
-  }
-  // смерть и деспавн врагов
-  w.enemies = w.enemies.filter((e) => {
-    if (e.hp <= 0) {
-      w.kills += 1;
-      if (e.kind === 'jarylys' && Math.hypot(e.x - w.px, e.y - w.py) < 70) { w.hp -= 16; w.hurtFlash = 0.3; banner(w, '🤢 Споры! −16 HP'); }
-      if (Math.random() < 0.35) w.loot.push({ x: e.x, y: e.y, item: Math.random() < 0.5 ? 'food' : 'ammo', r: 12 });
-      return false;
-    }
-    return Math.hypot(e.x - w.px, e.y - w.py) < 1400; // деспавн далёких
-  });
-
-  // подбор лута
-  w.loot = w.loot.filter((l) => {
-    if (Math.hypot(l.x - w.px, l.y - w.py) < l.r + 22) {
-      if (addItem(w, l.item, ITEMS[l.item].stackable ? 1 + Math.floor(Math.random() * 2) : 1)) {
-        banner(w, `🎒 +${ITEMS[l.item].emoji} ${ITEMS[l.item].name}`);
-        if (l.item === 'fortress_key') w.fortressKeyLoot = null;
-        return false;
-      }
-      return true; // инвентарь полон — оставить
-    }
-    return true;
-  });
-
-  w.hurtFlash = Math.max(0, w.hurtFlash - dt);
-  if (w.bannerT > 0) w.bannerT -= dt;
-  if (w.hp <= 0) { w.hp = 0; finish('lose'); }
+function QuestArrow({ label, done, nav }: { label: string; done: boolean; nav: { distance: number; angle: number } }) {
+  return (
+    <div style={{ ...styles.questRow, opacity: done ? 0.55 : 1 }}>
+      <span style={{ ...styles.arrow, transform: `rotate(${nav.angle}deg)` }}>▲</span>
+      <span>{label}</span>
+      <b>{done ? 'найдено' : `${nav.distance} м`}</b>
+    </div>
+  );
 }
 
-// ════════════════════════════ РЕНДЕР (вид от третьего лица) ════════════════════════════
-function render(ctx: CanvasRenderingContext2D, w: World) {
-  const W = window.innerWidth, H = window.innerHeight;
-  const night = w.time < 0.22 || w.time > 0.74;
-  const dusk  = (w.time >= 0.22 && w.time < 0.3) || (w.time > 0.66 && w.time <= 0.74);
-
-  // ── Камера: чуть позади игрока, смотрит на север (уменьшение Y = вперёд) ──
-  const CAM_BACK = 160;  // мировых единиц позади игрока
-  const CAM_H    = 88;   // высота камеры над землёй
-  const FOCAL    = 460;  // фокусное расстояние
-  const HORIZ    = Math.floor(H * 0.42); // горизонт на экране
-
-  // Проекция мировой точки на экран. null = за камерой
-  function proj(wx: number, wy: number) {
-    const d = (w.py + CAM_BACK) - wy; // глубина: >0 = перед камерой
-    if (d < 1) return null;
-    return { sx: W / 2 + ((wx - w.px) / d) * FOCAL, sy: HORIZ + (CAM_H / d) * FOCAL, sc: FOCAL / d, d };
-  }
-  // туман прозрачности по дистанции
-  function fog(d: number) { return Math.min(1, Math.max(0.06, 1 - d / (night ? 7000 : 18000))); }
-
-  // ── 1. Небо ──
-  const skyG = ctx.createLinearGradient(0, 0, 0, HORIZ);
-  if (night)     { skyG.addColorStop(0, '#040810'); skyG.addColorStop(1, '#0d1828'); }
-  else if (dusk) { skyG.addColorStop(0, '#0e0608'); skyG.addColorStop(1, '#7a3818'); }
-  else           { skyG.addColorStop(0, '#0c1610'); skyG.addColorStop(1, '#3a5e38'); }
-  ctx.fillStyle = skyG; ctx.fillRect(0, 0, W, HORIZ);
-  // звёзды ночью
-  if (night) {
-    for (let i = 0; i < 90; i++) {
-      ctx.fillStyle = `rgba(255,255,240,${0.4 + hash(i * 5.1) * 0.5})`;
-      ctx.beginPath(); ctx.arc(hash(i * 13.7) * W, hash(i * 27.3 + 1) * HORIZ * 0.92,
-        hash(i * 9.3 + 3) < 0.2 ? 1.4 : 0.9, 0, 7); ctx.fill();
-    }
-  }
-
-  // ── 2. Земля ──
-  const gG = ctx.createLinearGradient(0, HORIZ, 0, H);
-  gG.addColorStop(0, night ? '#0c140c' : dusk ? '#2a3618' : '#456228');
-  gG.addColorStop(1, night ? '#1a2417' : dusk ? '#5a6e36' : '#7a9a48');
-  ctx.fillStyle = gG; ctx.fillRect(0, HORIZ, W, H - HORIZ);
-  // перспективные линии земли
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = night ? 'rgba(36,51,28,0.22)' : dusk ? 'rgba(70,80,40,0.2)' : 'rgba(80,110,45,0.22)';
-  for (let depth = 30; depth < 8000; depth = depth < 200 ? depth + 30 : depth < 1200 ? depth + 130 : depth + 700) {
-    const sy = HORIZ + (CAM_H / depth) * FOCAL; if (sy > H + 2) break;
-    ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke();
-  }
-  for (let i = -14; i <= 14; i++) {
-    const wx = w.px + i * 300;
-    ctx.beginPath();
-    ctx.moveTo(W / 2 + ((wx - w.px) / 9000) * FOCAL, HORIZ);
-    ctx.lineTo(W / 2 + ((wx - w.px) / 1) * FOCAL, H);
-    ctx.stroke();
-  }
-
-  // ── 3. Сбор и сортировка объектов по глубине (художник) ──
-  const calls: { d: number; fn: () => void }[] = [];
-
-  // Настоящая крепость
-  calls.push({ d: (w.py + CAM_BACK) - FORTRESS_Y, fn: () => {
-    const p = proj(WORLD_W / 2, FORTRESS_Y); if (!p) return;
-    ctx.globalAlpha = fog(p.d);
-    const fw = Math.min(W * 0.95, Math.max(6, 800 * p.sc));
-    const fh = Math.min(H * 0.85, Math.max(4, 400 * p.sc));
-    ctx.fillStyle = night ? '#282b34' : '#8a8275';
-    ctx.fillRect(p.sx - fw / 2, p.sy - fh, fw, fh);
-    // башни
-    const tw = Math.max(2, fw * 0.16), th = fh * 1.25;
-    ctx.fillStyle = night ? '#1e2028' : '#6a6460';
-    ctx.fillRect(p.sx - fw / 2 - tw * 0.2, p.sy - th, tw, th);
-    ctx.fillRect(p.sx + fw / 2 - tw * 0.8, p.sy - th, tw, th);
-    // ворота
-    ctx.fillStyle = '#040406';
-    ctx.fillRect(p.sx - Math.max(1, fw * 0.06), p.sy - fh * 0.38, Math.max(1, fw * 0.12), fh * 0.38);
-    if (p.sc > 0.012) {
-      ctx.font = `bold ${Math.max(8, Math.min(22, 18 * p.sc))}px system-ui`;
-      ctx.fillStyle = '#d97757'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillText('🏰 КРЕПОСТЬ-ЛАБОРАТОРИЯ', p.sx, p.sy - fh - 3);
-    }
-    ctx.globalAlpha = 1;
-  }});
-
-  // Ложные крепости
-  for (const ff of FAKE_FORTRESS_DEFS) {
-    calls.push({ d: (w.py + CAM_BACK) - ff.y, fn: () => {
-      const p = proj(ff.x, ff.y); if (!p) return;
-      ctx.globalAlpha = fog(p.d);
-      const fw = Math.min(W * 0.85, Math.max(5, 650 * p.sc));
-      const fh = Math.min(H * 0.75, Math.max(3, 320 * p.sc));
-      ctx.fillStyle = night ? '#232630' : '#7a7570';
-      ctx.fillRect(p.sx - fw / 2, p.sy - fh, fw, fh);
-      ctx.fillStyle = '#050407';
-      ctx.fillRect(p.sx - Math.max(1, fw * 0.05), p.sy - fh * 0.35, Math.max(1, fw * 0.10), fh * 0.35);
-      if (p.sc > 0.012) {
-        ctx.font = `bold ${Math.max(7, Math.min(18, 14 * p.sc))}px system-ui`;
-        ctx.fillStyle = '#c08060'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillText('🏰 КРЕПОСТЬ', p.sx, p.sy - fh - 3);
-      }
-      ctx.globalAlpha = 1;
-    }});
-  }
-
-  // Загадки
-  for (let i = 0; i < RIDDLE_DEFS.length; i++) {
-    if (w.riddleSolved[i]) continue;
-    const rd = RIDDLE_DEFS[i];
-    calls.push({ d: (w.py + CAM_BACK) - rd.y, fn: () => {
-      const p = proj(rd.x, rd.y); if (!p || p.sx < -60 || p.sx > W + 60 || p.sy > H + 40) return;
-      ctx.globalAlpha = Math.min(0.95, fog(p.d) * 1.4);
-      const sz = Math.max(8, Math.min(38, 30 * p.sc));
-      const gr = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, sz * 1.6);
-      gr.addColorStop(0, 'rgba(210,170,60,0.4)'); gr.addColorStop(1, 'rgba(210,170,60,0)');
-      ctx.fillStyle = gr; ctx.fillRect(p.sx - sz * 2, p.sy - sz * 2, sz * 4, sz * 4);
-      ctx.font = `${sz}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(i === 0 ? '📜' : '🗝️', p.sx, p.sy);
-      if (sz > 10) {
-        ctx.font = `bold ${Math.max(6, sz * 0.4)}px system-ui`;
-        ctx.fillStyle = '#ffd060'; ctx.textBaseline = 'top';
-        ctx.fillText(i === 0 ? 'КОД' : 'ОТМЫЧКА', p.sx, p.sy + sz * 0.55);
-      }
-      ctx.globalAlpha = 1;
-    }});
-  }
-
-  // Лут
-  for (const l of w.loot) {
-    calls.push({ d: (w.py + CAM_BACK) - l.y, fn: () => {
-      const p = proj(l.x, l.y); if (!p || p.sx < -50 || p.sx > W + 50 || p.sy > H + 30) return;
-      ctx.globalAlpha = Math.min(0.9, fog(p.d) * 1.3);
-      const sz = Math.max(7, Math.min(28, 22 * p.sc));
-      ctx.font = `${sz}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(ITEMS[l.item].emoji, p.sx, p.sy);
-      ctx.globalAlpha = 1;
-    }});
-  }
-
-  // Пули
-  for (const b of w.bullets) {
-    calls.push({ d: (w.py + CAM_BACK) - b.y, fn: () => {
-      const p = proj(b.x, b.y); if (!p) return;
-      ctx.fillStyle = '#ffe08a';
-      ctx.beginPath(); ctx.arc(p.sx, p.sy, Math.max(1.5, 4 * p.sc), 0, 7); ctx.fill();
-    }});
-  }
-
-  // Враги
-  for (const e of w.enemies) {
-    calls.push({ d: (w.py + CAM_BACK) - e.y, fn: () => {
-      const p = proj(e.x, e.y); if (!p || p.sx < -100 || p.sx > W + 100 || p.sy > H + 60) return;
-      ctx.globalAlpha = Math.min(1, fog(p.d) * 1.5);
-      const d = ENEMY_DEFS[e.kind];
-      const r = Math.max(5, Math.min(62, e.r * p.sc * 2.4));
-      // тень
-      ctx.beginPath(); ctx.ellipse(p.sx, p.sy + r * 0.28, r * 0.82, r * 0.26, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.fill();
-      // тело
-      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, 7);
-      ctx.fillStyle = e.hitFlash > 0 ? '#fff' : d.color; ctx.fill();
-      ctx.font = `${Math.max(8, r * 1.6)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(d.emoji, p.sx, p.sy);
-      if (e.hp < e.maxHp) {
-        const bw = r * 2.8;
-        ctx.fillStyle = '#000a'; ctx.fillRect(p.sx - bw / 2, p.sy - r - 12, bw, 5);
-        ctx.fillStyle = '#d9534f'; ctx.fillRect(p.sx - bw / 2, p.sy - r - 12, bw * (e.hp / e.maxHp), 5);
-      }
-      ctx.globalAlpha = 1;
-    }});
-  }
-
-  // Союзники
-  for (const al of w.allies) {
-    calls.push({ d: (w.py + CAM_BACK) - al.y, fn: () => {
-      const p = proj(al.x, al.y); if (!p || p.sx < -100 || p.sx > W + 100 || p.sy > H + 60) return;
-      ctx.globalAlpha = Math.min(1, fog(p.d) * 1.5);
-      const r = Math.max(5, Math.min(50, 15 * p.sc * 2.4));
-      ctx.beginPath(); ctx.ellipse(p.sx, p.sy + r * 0.28, r * 0.82, r * 0.26, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.32)'; ctx.fill();
-      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, 7);
-      ctx.fillStyle = '#3a7d44'; ctx.fill();
-      ctx.lineWidth = Math.max(1, 2 * p.sc); ctx.strokeStyle = '#9be7a8'; ctx.stroke();
-      ctx.font = `${Math.max(8, r * 1.4)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(al.emoji, p.sx, p.sy);
-      const bw = r * 2.8;
-      ctx.fillStyle = '#000a'; ctx.fillRect(p.sx - bw / 2, p.sy - r - 10, bw, 4);
-      ctx.fillStyle = '#5fb87a'; ctx.fillRect(p.sx - bw / 2, p.sy - r - 10, bw * (al.hp / al.maxHp), 4);
-      ctx.globalAlpha = 1;
-    }});
-  }
-
-  // Туннельный преследователь
-  if (w.tunnelChaser) {
-    const tc = w.tunnelChaser;
-    calls.push({ d: (w.py + CAM_BACK) - tc.y, fn: () => {
-      const p = proj(tc.x, tc.y); if (!p) return;
-      ctx.globalAlpha = Math.min(1, fog(p.d) * 1.8);
-      const r = Math.max(8, Math.min(80, tc.r * p.sc * 2.6));
-      const gr = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, r * 2.5);
-      gr.addColorStop(0, 'rgba(220,0,0,0.55)'); gr.addColorStop(1, 'rgba(220,0,0,0)');
-      ctx.fillStyle = gr; ctx.fillRect(p.sx - r * 2.5, p.sy - r * 2.5, r * 5, r * 5);
-      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, 7);
-      ctx.fillStyle = '#880000'; ctx.fill();
-      ctx.font = `${Math.max(12, r * 1.6)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('👾', p.sx, p.sy);
-      ctx.globalAlpha = 1;
-    }});
-  }
-
-  // Игрок — фиксирован внизу по центру
-  calls.push({ d: CAM_BACK, fn: () => {
-    const pcx = W / 2, pcy = Math.floor(H * 0.76);
-    ctx.beginPath(); ctx.ellipse(pcx, pcy + 26, 28, 10, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
-    if (w.attackTimer > 0) {
-      ctx.strokeStyle = '#fff8'; ctx.lineWidth = 6;
-      ctx.beginPath(); ctx.arc(pcx, pcy, 54, w.aim - 0.85, w.aim + 0.85); ctx.stroke();
-    }
-    ctx.beginPath(); ctx.arc(pcx, pcy, 24, 0, 7);
-    ctx.fillStyle = w.hurtFlash > 0 ? '#ff6b6b' : (w.char === 'erlan' ? '#c98a4a' : '#4a90c9');
-    ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = '#ffffff44'; ctx.stroke();
-    ctx.font = '30px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(CHARACTERS[w.char].emoji, pcx, pcy);
-    ctx.strokeStyle = '#fff9'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(pcx, pcy); ctx.lineTo(pcx + Math.cos(w.aim) * 34, pcy + Math.sin(w.aim) * 34); ctx.stroke();
-  }});
-
-  // Сортировка по глубине и отрисовка
-  calls.sort((a, b) => b.d - a.d);
-  for (const c of calls) c.fn();
-
-  // ── 4. Тьма ночью + свет факела ──
-  if (night || dusk) {
-    const edge = night ? 0.50 : 0.32;
-    ctx.fillStyle = `rgba(5,7,13,${edge})`; ctx.fillRect(0, 0, W, H);
-    const pcx = W / 2, pcy = Math.floor(H * 0.76);
-    const radius = night ? (w.torch ? 300 : 170) : (w.torch ? 420 : 260);
-    ctx.globalCompositeOperation = 'destination-out';
-    const hole = ctx.createRadialGradient(pcx, pcy, 0, pcx, pcy, radius);
-    hole.addColorStop(0, `rgba(0,0,0,${edge})`); hole.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = hole; ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = 'source-over';
-  }
-
-  // туннельный ивент — виньетка
-  if (w.eventId === 2) {
-    const gr = ctx.createRadialGradient(W / 2, H / 2, H * 0.22, W / 2, H / 2, H * 0.72);
-    gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(4,6,4,0.78)');
-    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
-  }
-
-  // урон-вспышка
-  if (w.hurtFlash > 0) { ctx.fillStyle = `rgba(200,0,0,${w.hurtFlash * 0.5})`; ctx.fillRect(0, 0, W, H); }
-
-  // заморозка
-  if (w.frozenTimer > 0) {
-    ctx.fillStyle = `rgba(80,160,240,${Math.min(0.38, w.frozenTimer * 0.32)})`; ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = 'rgba(160,220,255,0.55)'; ctx.lineWidth = 5; ctx.strokeRect(3, 3, W - 6, H - 6);
-  }
-
-  drawHUD(ctx, w, W, H);
+function InventoryPanel({ items, selectedSlot }: { items: InventoryEntry[]; selectedSlot: number }) {
+  const slots = Array.from({ length: 9 }, (_, index) => items[index] ?? null);
+  return (
+    <div style={styles.inventoryPanel}>
+      <div style={styles.inventoryTitle}>Инвентарь</div>
+      <div style={styles.inventoryGrid}>
+        {slots.map((item, index) => (
+          <div key={item?.kind ?? `empty-${index}`} style={{ ...styles.inventorySlot, opacity: item ? 1 : 0.5 }} title={item ? ITEM_LABELS[item.kind] : 'Пустой слот'}>
+            <span style={index === selectedSlot ? styles.slotNumberSelected : styles.slotNumber}>{index + 1}</span>
+            {item ? (
+              <>
+                <span style={styles.inventoryIcon}>{ITEM_ICONS[item.kind]}</span>
+                <span style={styles.inventoryName}>{ITEM_LABELS[item.kind]}</span>
+                <b style={styles.inventoryCount}>x{item.count}</b>
+              </>
+            ) : (
+              <span style={styles.emptySlot}>пусто</span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={styles.inventoryHint}>H - аптечка</div>
+    </div>
+  );
 }
 
-function drawHUD(ctx: CanvasRenderingContext2D, w: World, W: number, H: number) {
-  ctx.textBaseline = 'alphabetic';
-  // HP бар
-  ctx.fillStyle = '#000a'; ctx.fillRect(20, 20, 264, 26);
-  ctx.fillStyle = w.hp > w.maxHp * 0.3 ? '#5fb87a' : '#d9534f';
-  ctx.fillRect(22, 22, 260 * Math.max(0, w.hp / w.maxHp), 22);
-  ctx.fillStyle = '#fff'; ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'left';
-  ctx.fillText(`❤️ ${Math.ceil(w.hp)}/${w.maxHp}`, 30, 38);
-
-  // верхняя инфа
-  const night = w.time < 0.22 || w.time > 0.74;
-  ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.font = 'bold 16px system-ui';
-  ctx.fillText(`📅 День ${w.day}  ·  ${night ? '🌑 Ночь' : '☀️ День'}  ·  ☠️ ${w.kills}`, W / 2, 30);
-
-  // таймер активного ивента
-  if (w.eventId > 0 && w.eventTimer > 0) {
-    const labels: Record<number, string> = { 1: '⚠️ ХАРДКОР', 2: '🚇 ТУННЕЛЬ', 3: '🌪️ БУРЯ', 4: '👹 НАШЕСТВИЕ', 5: '🔴 БЕРСЕРК' };
-    const lbl = labels[w.eventId] ?? '⚠️ ИВЕНТ';
-    ctx.textAlign = 'right'; ctx.fillStyle = '#ff4422'; ctx.font = 'bold 16px system-ui';
-    ctx.fillText(`${lbl}  ⏱ ${Math.ceil(w.eventTimer)}с`, W - 18, 38);
-  }
-
-  // баннер
-  if (w.bannerT > 0) {
-    ctx.globalAlpha = Math.min(1, w.bannerT);
-    ctx.fillStyle = '#000b'; const tw = ctx.measureText(w.banner).width + 40;
-    ctx.fillRect(W / 2 - tw / 2, 44, tw, 30);
-    ctx.fillStyle = '#ffd9a0'; ctx.font = 'bold 16px system-ui'; ctx.fillText(w.banner, W / 2, 64);
-    ctx.globalAlpha = 1;
-  }
-
-  // стрелки к квест-предметам
-  {
-    type QArrow = { wx: number; wy: number; emoji: string; color: string; margin: number };
-    const targets: QArrow[] = [];
-    if (!w.riddleSolved[0]) targets.push({ wx: RIDDLE_DEFS[0].x, wy: RIDDLE_DEFS[0].y, emoji: '📜', color: '#60c8ff', margin: 58 });
-    if (!w.riddleSolved[1]) targets.push({ wx: RIDDLE_DEFS[1].x, wy: RIDDLE_DEFS[1].y, emoji: '🗝️', color: '#c07cff', margin: 80 });
-    if (w.fortressKeyLoot)  targets.push({ wx: w.fortressKeyLoot.x, wy: w.fortressKeyLoot.y, emoji: '🔑', color: '#ffd700', margin: 102 });
-    const pulse = 0.65 + 0.35 * Math.sin(w.playTime * 4);
-    for (const t of targets) {
-      const ang = Math.atan2(t.wy - w.py, t.wx - w.px);
-      const ca = Math.cos(ang), sa = Math.sin(ang);
-      const edgeDist = Math.min(
-        (W / 2 - t.margin) / (Math.abs(ca) || 0.001),
-        (H / 2 - t.margin) / (Math.abs(sa) || 0.001),
-      );
-      const ax = W / 2 + ca * edgeDist, ay = H / 2 + sa * edgeDist;
-      const verst = Math.max(1, Math.round(Math.hypot(t.wx - w.px, t.wy - w.py) / 90));
-      ctx.save();
-      ctx.globalAlpha = pulse;
-      ctx.shadowColor = t.color; ctx.shadowBlur = 16;
-      ctx.translate(ax, ay); ctx.rotate(ang);
-      ctx.fillStyle = t.color;
-      ctx.beginPath(); ctx.moveTo(18, 0); ctx.lineTo(-8, -9); ctx.lineTo(-8, 9); ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-      ctx.globalAlpha = pulse;
-      ctx.font = 'bold 12px system-ui'; ctx.fillStyle = t.color;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
-      ctx.fillText(`${t.emoji} ~${verst}в`, W / 2 + ca * (edgeDist - 30), H / 2 + sa * (edgeDist - 30));
-      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
-    }
-    ctx.textBaseline = 'alphabetic';
-  }
-
-  // инвентарь (9 слотов снизу)
-  const n = 9, box = 52, gap = 8, totW = n * box + (n - 1) * gap;
-  const sx = W / 2 - totW / 2, sy = H - box - 18;
-  for (let i = 0; i < n; i++) {
-    const x = sx + i * (box + gap);
-    ctx.fillStyle = i === w.equipped ? '#d9775744' : '#000000aa';
-    ctx.strokeStyle = i === w.equipped ? '#d97757' : '#ffffff33';
-    ctx.lineWidth = i === w.equipped ? 3 : 1;
-    ctx.fillRect(x, sy, box, box); ctx.strokeRect(x, sy, box, box);
-    ctx.fillStyle = '#fff9'; ctx.font = '11px system-ui'; ctx.textAlign = 'left'; ctx.fillText(String(i + 1), x + 5, sy + 14);
-    const sl = w.inv[i];
-    if (sl) {
-      ctx.font = '24px system-ui'; ctx.textAlign = 'center'; ctx.fillText(ITEMS[sl.item].emoji, x + box / 2, sy + box / 2 + 8);
-      if (sl.count > 1) { ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'right'; ctx.fillStyle = '#ffd9a0'; ctx.fillText(`×${sl.count}`, x + box - 4, sy + box - 5); }
-    }
-  }
-  ctx.textAlign = 'left';
+function ZombieCongratsPhoto({ score }: { score: number }) {
+  return (
+    <div style={styles.congratsPhoto}>
+      <div style={styles.congratsSky} />
+      <div style={styles.congratsFrame}>
+        <div style={styles.congratsFlash}>QASQYR PHOTO 1873</div>
+        <div style={styles.congratsPeople}>
+          {[0, 1, 2, 3, 4].map((index) => (
+            <div key={index} style={{ ...styles.congratsZombie, transform: `translateY(${index % 2 === 0 ? 0 : 18}px) rotate(${(index - 2) * 3}deg)` }}>
+              <div style={styles.congratsHead}>
+                <span style={styles.congratsEyeLeft} />
+                <span style={styles.congratsEyeRight} />
+                <span style={styles.congratsSmile} />
+              </div>
+              <div style={styles.congratsBody} />
+              <div style={styles.congratsArmLeft} />
+              <div style={styles.congratsArmRight} />
+              <div style={styles.congratsHeart}>♥</div>
+            </div>
+          ))}
+        </div>
+        <div style={styles.congratsCaption}>
+          <h2 style={styles.congratsTitle}>Зомби поздравляют тебя!</h2>
+          <p style={styles.congratsText}>Ты собрал истории степи, открыл крепость и доказал, что даже зараженные умеют радоваться хорошему финалу.</p>
+          <b style={styles.congratsScore}>Счет: {score}</b>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-// ════════════════════════════ СТИЛИ ════════════════════════════
-const overlay: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 9999, background: '#0c0d11', color: '#e8e6e1', overflow: 'hidden' };
-const playBtn: React.CSSProperties = { background: '#d97757', color: '#fff', border: 'none', borderRadius: 12, padding: '14px 28px', fontSize: 18, fontWeight: 800, letterSpacing: 1, cursor: 'pointer' };
-const exitBtn: React.CSSProperties = { position: 'absolute', top: 14, right: 16, background: '#000000aa', color: '#fff', border: '1px solid #ffffff33', borderRadius: 10, padding: '8px 12px', fontSize: 13, cursor: 'pointer' };
-const overPanel: React.CSSProperties = { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(560px,92vw)', background: '#141519ee', border: '1px solid #2a2d35', borderRadius: 18, padding: 32, textAlign: 'center', boxShadow: '0 20px 80px #000c' };
+function ZombieScreamer() {
+  return (
+    <div style={styles.screamer}>
+      <div style={styles.screamerFace}>
+        <div style={styles.screamerEyeLeft} />
+        <div style={styles.screamerEyeRight} />
+        <div style={styles.screamerMouth} />
+        <div style={styles.screamerTeethTop} />
+        <div style={styles.screamerTeethBottom} />
+      </div>
+      <div style={styles.screamerText}>ЗАРАЖЕННЫЙ ДОБРАЛСЯ ДО ТЕБЯ</div>
+    </div>
+  );
+}
+
+function npcLoreThread(npc: HouseNpc) {
+  if (npc.mood === 'good') return 'Линия лора: иммунитет двух друзей связан не только с кумысом, а с древней закваской рода Каскыр. Союзники начинают понимать: вирус можно не просто уничтожить, а переучить.';
+  if (npc.mood === 'evil') return 'Линия лора: не все злодеи заражены. Некоторые услышали голос северной крепости и кормят ее страхом, чтобы управлять зомби.';
+  return 'Линия лора: волки были первыми носителями, но кто-то направил стаю к аулам именно в ночь, когда над степью погасли звезды.';
+}
+
+function dialogStepChoices(npc: HouseNpc, step: number): NpcChoice[] {
+  if (step === 0) {
+    return [
+      { text: 'Спросить, что случилось в первую ночь', reply: `${npc.name} говорит тише: в ту ночь волки не выли, а будто повторяли чужой приказ. Вирус шел за звуком, как за дудкой.`, effect: 'story' },
+      { text: 'Спросить про кумысный иммунитет', reply: `${npc.name} вспоминает старую легенду: кислый кумыс удерживает человека за имя, когда зараза пытается стереть память.`, effect: 'story' },
+    ];
+  }
+  if (step === 1) {
+    return [
+      { text: 'Уточнить про северную крепость', reply: `${npc.name} шепчет: крепость не просто стены. Под ней спит колодец, где заражение учится говорить человеческими голосами.`, effect: 'story' },
+      { text: 'Спросить, почему зомби не входят в дом', reply: `${npc.name} показывает порог: на нем соль, зола и кумысная закваска. Зараженные забывают дорогу, пока дверь закрыта.`, effect: 'story' },
+    ];
+  }
+  return npc.choices;
+}
+
+function DialogPanel({ dialog, onChoose }: { dialog: DialogState; onChoose: (choice: NpcChoice) => void }) {
+  const { npc, step, lastReply } = dialog;
+  const [talkFrame, setTalkFrame] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setTalkFrame((frame) => frame + 1), 170);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const bob = Math.sin(talkFrame * 0.7);
+  const mouthOpen = 8 + Math.abs(Math.sin(talkFrame * 1.15)) * 12;
+  const portraitColor = npc.mood === 'good' ? '#b78355' : npc.mood === 'evil' ? '#8c7a65' : '#ad8762';
+  const eyeColor = npc.mood === 'evil' ? '#ff6969' : npc.mood === 'good' ? '#d7ffe0' : '#f6f2e9';
+  const browTilt = npc.mood === 'evil' ? 18 : npc.mood === 'good' ? -8 : 0;
+  const choices = dialogStepChoices(npc, step);
+
+  const moodLabel = npc.mood === 'good' ? 'союзник' : npc.mood === 'evil' ? 'опасный' : 'нейтральный';
+  return (
+    <div style={styles.dialogBackdrop}>
+      <section style={styles.dialogPanel}>
+        <div style={{ ...styles.npcPortrait, transform: `translateY(${bob * 4}px)` }}>
+          <div style={{ ...styles.npcBody, background: npc.mood === 'evil' ? '#2a2521' : npc.mood === 'good' ? '#3f5b48' : '#4b4239' }} />
+          <div style={{ ...styles.npcHandLeft, transform: `rotate(${bob * 18 - 18}deg)` }} />
+          <div style={{ ...styles.npcHandRight, transform: `rotate(${bob * -18 + 18}deg)` }} />
+          <div style={{ ...styles.npcHead, background: portraitColor }}>
+            <div style={{ ...styles.npcBrowLeft, transform: `rotate(${browTilt}deg)` }} />
+            <div style={{ ...styles.npcBrowRight, transform: `rotate(${-browTilt}deg)` }} />
+            <div style={{ ...styles.npcEyeLeft, background: eyeColor }} />
+            <div style={{ ...styles.npcEyeRight, background: eyeColor }} />
+            <div style={{ ...styles.npcMouth, height: mouthOpen, borderRadius: npc.mood === 'good' ? '0 0 18px 18px' : 18 }} />
+          </div>
+        </div>
+        <div style={styles.dialogMeta}>{npc.title} · {moodLabel}</div>
+        <h3 style={styles.dialogName}>{npc.name}</h3>
+        <p style={styles.dialogText}>{npc.story}</p>
+        <p style={styles.dialogLore}>{npcLoreThread(npc)}</p>
+        {lastReply && <p style={styles.dialogReply}>{lastReply}</p>}
+        <div style={styles.dialogProgress}>Реплика {Math.min(step + 1, 3)} / 3</div>
+        <div style={styles.dialogChoices}>
+          {choices.map((choice) => (
+            <button key={choice.text} type="button" onClick={() => onChoose(choice)} style={styles.dialogButton}>
+              {choice.text}
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const styles: Record<string, CSSProperties> = {
+  root: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 9999,
+    overflow: 'hidden',
+    background: '#101419',
+    color: '#f6f2e9',
+    fontFamily: 'Inter, system-ui, sans-serif',
+  },
+  mount: { position: 'absolute', inset: 0 },
+  exit: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 3,
+    border: '1px solid rgba(255,255,255,.28)',
+    background: 'rgba(13,17,22,.74)',
+    color: '#fff',
+    borderRadius: 8,
+    padding: '10px 14px',
+  },
+  hud: {
+    position: 'absolute',
+    left: 18,
+    right: 18,
+    bottom: 18,
+    zIndex: 2,
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(82px, 1fr))',
+    gap: 10,
+    alignItems: 'stretch',
+    pointerEvents: 'none',
+  },
+  stat: {
+    minHeight: 58,
+    border: '1px solid rgba(255,255,255,.18)',
+    background: 'rgba(8,12,16,.72)',
+    borderRadius: 8,
+    padding: '9px 12px',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+  },
+  hint: {
+    gridColumn: '1 / -1',
+    minHeight: 58,
+    border: '1px solid rgba(255,255,255,.18)',
+    background: 'rgba(8,12,16,.72)',
+    borderRadius: 8,
+    padding: '18px 16px',
+    fontWeight: 700,
+  },
+  questPanel: {
+    position: 'absolute',
+    top: 18,
+    left: 18,
+    zIndex: 3,
+    display: 'grid',
+    gap: 8,
+    width: 210,
+    pointerEvents: 'none',
+  },
+  questRow: {
+    display: 'grid',
+    gridTemplateColumns: '26px 1fr auto',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 38,
+    border: '1px solid rgba(255,255,255,.18)',
+    background: 'rgba(8,12,16,.72)',
+    borderRadius: 8,
+    padding: '7px 10px',
+    fontSize: 14,
+  },
+  arrow: {
+    display: 'inline-grid',
+    placeItems: 'center',
+    width: 24,
+    height: 24,
+    color: '#ffd34d',
+    fontSize: 19,
+    transformOrigin: '50% 50%',
+  },
+  fortressDistance: {
+    minHeight: 34,
+    border: '1px solid rgba(255,255,255,.14)',
+    background: 'rgba(8,12,16,.58)',
+    borderRadius: 8,
+    padding: '8px 10px',
+    color: '#d8d1c3',
+    fontSize: 13,
+  },
+  inventoryPanel: {
+    position: 'absolute',
+    top: 18,
+    right: 18,
+    zIndex: 3,
+    width: 260,
+    border: '1px solid rgba(255,255,255,.18)',
+    background: 'rgba(8,12,16,.72)',
+    borderRadius: 8,
+    padding: 10,
+    pointerEvents: 'none',
+  },
+  inventoryTitle: {
+    fontSize: 13,
+    fontWeight: 900,
+    color: '#ffd37b',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  inventoryGrid: {
+    display: 'grid',
+    gap: 6,
+    maxHeight: 330,
+    overflow: 'hidden',
+  },
+  inventorySlot: {
+    display: 'grid',
+    gridTemplateColumns: '20px 28px 1fr auto',
+    alignItems: 'center',
+    gap: 7,
+    minHeight: 34,
+    border: '1px solid rgba(255,255,255,.12)',
+    background: 'rgba(255,255,255,.06)',
+    borderRadius: 6,
+    padding: '5px 7px',
+    fontSize: 13,
+  },
+  slotNumber: {
+    color: '#7f8c84',
+    fontSize: 11,
+    fontWeight: 900,
+  },
+  slotNumberSelected: {
+    display: 'grid',
+    placeItems: 'center',
+    width: 20,
+    height: 24,
+    borderRadius: 4,
+    background: '#ffd34d',
+    color: '#141007',
+    fontSize: 11,
+    fontWeight: 1000,
+  },
+  inventoryIcon: {
+    display: 'grid',
+    placeItems: 'center',
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    background: 'rgba(255,211,77,.16)',
+    color: '#ffd34d',
+    fontWeight: 900,
+  },
+  inventoryName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  inventoryCount: {
+    color: '#f6f2e9',
+    fontSize: 12,
+  },
+  emptyInventory: {
+    color: '#aeb8be',
+    fontSize: 13,
+    padding: '8px 0',
+  },
+  emptySlot: {
+    gridColumn: '2 / -1',
+    color: '#758078',
+    fontSize: 12,
+  },
+  inventoryHint: {
+    marginTop: 8,
+    color: '#aeb8be',
+    fontSize: 12,
+  },
+  congratsPhoto: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 28,
+    display: 'grid',
+    placeItems: 'center',
+    overflow: 'hidden',
+    background: 'linear-gradient(180deg, #88b7c8 0%, #e8d29c 58%, #6f7b42 100%)',
+    color: '#241914',
+  },
+  congratsSky: {
+    position: 'absolute',
+    inset: 0,
+    background: 'radial-gradient(circle at 50% 20%, rgba(255,255,230,.9), rgba(255,255,255,0) 24%), linear-gradient(90deg, rgba(255,255,255,.18), rgba(0,0,0,.08))',
+  },
+  congratsFrame: {
+    position: 'relative',
+    width: 'min(980px, calc(100vw - 30px))',
+    height: 'min(650px, calc(100vh - 30px))',
+    border: '14px solid #f3ead8',
+    outline: '1px solid rgba(0,0,0,.3)',
+    borderRadius: 8,
+    background: 'linear-gradient(180deg, rgba(143,188,197,.9), rgba(117,128,70,.95))',
+    boxShadow: '0 28px 100px rgba(0,0,0,.58), inset 0 0 80px rgba(255,255,255,.2)',
+    overflow: 'hidden',
+  },
+  congratsFlash: {
+    position: 'absolute',
+    top: 16,
+    left: 18,
+    color: 'rgba(36,25,20,.62)',
+    fontWeight: 1000,
+    letterSpacing: 3,
+    fontSize: 12,
+  },
+  congratsPeople: {
+    position: 'absolute',
+    left: '6%',
+    right: '6%',
+    bottom: '20%',
+    height: '52%',
+    display: 'flex',
+    justifyContent: 'space-around',
+    alignItems: 'flex-end',
+  },
+  congratsZombie: {
+    position: 'relative',
+    width: 120,
+    height: 245,
+  },
+  congratsHead: {
+    position: 'absolute',
+    left: 26,
+    top: 0,
+    width: 68,
+    height: 78,
+    borderRadius: '46% 48% 42% 45%',
+    background: '#9aa879',
+    border: '3px solid #394230',
+    boxShadow: 'inset 0 -14px 18px rgba(0,0,0,.2)',
+  },
+  congratsEyeLeft: {
+    position: 'absolute',
+    left: 17,
+    top: 28,
+    width: 10,
+    height: 10,
+    borderRadius: '50%',
+    background: '#fff6bb',
+    boxShadow: '0 0 12px #fff6bb',
+  },
+  congratsEyeRight: {
+    position: 'absolute',
+    right: 17,
+    top: 28,
+    width: 10,
+    height: 10,
+    borderRadius: '50%',
+    background: '#fff6bb',
+    boxShadow: '0 0 12px #fff6bb',
+  },
+  congratsSmile: {
+    position: 'absolute',
+    left: 22,
+    bottom: 17,
+    width: 24,
+    height: 10,
+    borderBottom: '4px solid #351412',
+    borderRadius: '0 0 20px 20px',
+  },
+  congratsBody: {
+    position: 'absolute',
+    left: 24,
+    top: 76,
+    width: 72,
+    height: 126,
+    borderRadius: '26px 26px 8px 8px',
+    background: '#3f5138',
+    border: '2px solid rgba(0,0,0,.22)',
+  },
+  congratsArmLeft: {
+    position: 'absolute',
+    left: 0,
+    top: 98,
+    width: 56,
+    height: 14,
+    borderRadius: 999,
+    background: '#8f9c70',
+    transform: 'rotate(-28deg)',
+  },
+  congratsArmRight: {
+    position: 'absolute',
+    right: 0,
+    top: 98,
+    width: 56,
+    height: 14,
+    borderRadius: 999,
+    background: '#8f9c70',
+    transform: 'rotate(28deg)',
+  },
+  congratsHeart: {
+    position: 'absolute',
+    left: 37,
+    top: 104,
+    width: 48,
+    height: 48,
+    display: 'grid',
+    placeItems: 'center',
+    color: '#e34262',
+    fontSize: 46,
+    lineHeight: 1,
+    textShadow: '0 4px 0 rgba(0,0,0,.18), 0 0 18px rgba(255,80,120,.65)',
+  },
+  congratsCaption: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    minHeight: 138,
+    padding: '22px 28px',
+    background: 'rgba(243,234,216,.92)',
+    textAlign: 'center',
+  },
+  congratsTitle: {
+    margin: '0 0 8px',
+    fontFamily: 'Georgia, serif',
+    fontSize: 'clamp(30px, 5vw, 56px)',
+    lineHeight: 1,
+  },
+  congratsText: {
+    margin: '0 auto 10px',
+    maxWidth: 760,
+    fontSize: 16,
+    lineHeight: 1.45,
+    fontWeight: 700,
+  },
+  congratsScore: {
+    fontSize: 18,
+    color: '#7a2f28',
+  },
+  screamer: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 20,
+    display: 'grid',
+    placeItems: 'center',
+    background: 'radial-gradient(circle at 50% 45%, rgba(120,0,0,.42), rgba(0,0,0,.98) 58%)',
+    pointerEvents: 'none',
+  },
+  screamerFace: {
+    position: 'relative',
+    width: 'min(78vw, 620px)',
+    height: 'min(78vw, 620px)',
+    borderRadius: '42% 45% 48% 46%',
+    background: 'linear-gradient(180deg, #7f8b62, #34402f 42%, #141812)',
+    border: '10px solid #080909',
+    boxShadow: '0 0 90px rgba(190,0,0,.85), inset 0 0 80px rgba(0,0,0,.9)',
+    transform: 'scale(1.08) rotate(-2deg)',
+  },
+  screamerEyeLeft: {
+    position: 'absolute',
+    left: '22%',
+    top: '26%',
+    width: '20%',
+    height: '17%',
+    borderRadius: '50%',
+    background: '#fff8c9',
+    boxShadow: '0 0 28px #fff2a0',
+  },
+  screamerEyeRight: {
+    position: 'absolute',
+    right: '22%',
+    top: '24%',
+    width: '20%',
+    height: '18%',
+    borderRadius: '50%',
+    background: '#fff8c9',
+    boxShadow: '0 0 28px #fff2a0',
+  },
+  screamerMouth: {
+    position: 'absolute',
+    left: '24%',
+    top: '54%',
+    width: '52%',
+    height: '28%',
+    borderRadius: '0 0 48% 48%',
+    background: '#050202',
+    border: '6px solid #2b0505',
+    boxShadow: 'inset 0 0 30px #000',
+  },
+  screamerTeethTop: {
+    position: 'absolute',
+    left: '31%',
+    top: '55%',
+    width: '38%',
+    height: '7%',
+    background: 'repeating-linear-gradient(90deg, #e7dfc9 0 13px, transparent 13px 23px)',
+  },
+  screamerTeethBottom: {
+    position: 'absolute',
+    left: '34%',
+    top: '75%',
+    width: '32%',
+    height: '7%',
+    background: 'repeating-linear-gradient(90deg, #d8cfb8 0 12px, transparent 12px 22px)',
+  },
+  screamerText: {
+    position: 'absolute',
+    bottom: 36,
+    left: 20,
+    right: 20,
+    textAlign: 'center',
+    color: '#ffdddd',
+    fontSize: 'clamp(18px, 4vw, 46px)',
+    fontWeight: 1000,
+    letterSpacing: 3,
+    textShadow: '0 0 18px #d00000, 0 4px 0 #000',
+  },
+  dialogBackdrop: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 6,
+    display: 'grid',
+    placeItems: 'center',
+    background: 'rgba(0,0,0,.36)',
+    pointerEvents: 'auto',
+  },
+  dialogPanel: {
+    width: 'min(620px, calc(100vw - 32px))',
+    border: '1px solid rgba(255,211,77,.32)',
+    background: 'rgba(9,13,12,.94)',
+    borderRadius: 8,
+    padding: 22,
+    boxShadow: '0 24px 90px rgba(0,0,0,.62)',
+    color: '#f6f2e9',
+  },
+  npcPortrait: {
+    position: 'relative',
+    float: 'left',
+    width: 118,
+    height: 152,
+    margin: '0 18px 10px 0',
+  },
+  npcBody: {
+    position: 'absolute',
+    left: 26,
+    bottom: 0,
+    width: 66,
+    height: 76,
+    borderRadius: '22px 22px 8px 8px',
+    border: '1px solid rgba(255,255,255,.12)',
+  },
+  npcHead: {
+    position: 'absolute',
+    left: 28,
+    top: 10,
+    width: 62,
+    height: 68,
+    borderRadius: '48% 48% 44% 44%',
+    border: '2px solid rgba(30,18,10,.42)',
+    boxShadow: 'inset 0 -10px 16px rgba(0,0,0,.18)',
+  },
+  npcEyeLeft: {
+    position: 'absolute',
+    left: 15,
+    top: 29,
+    width: 10,
+    height: 8,
+    borderRadius: '50%',
+    boxShadow: '0 0 10px currentColor',
+  },
+  npcEyeRight: {
+    position: 'absolute',
+    right: 15,
+    top: 29,
+    width: 10,
+    height: 8,
+    borderRadius: '50%',
+    boxShadow: '0 0 10px currentColor',
+  },
+  npcBrowLeft: {
+    position: 'absolute',
+    left: 10,
+    top: 22,
+    width: 18,
+    height: 3,
+    background: '#2b1a12',
+    transformOrigin: '100% 50%',
+  },
+  npcBrowRight: {
+    position: 'absolute',
+    right: 10,
+    top: 22,
+    width: 18,
+    height: 3,
+    background: '#2b1a12',
+    transformOrigin: '0 50%',
+  },
+  npcMouth: {
+    position: 'absolute',
+    left: 23,
+    top: 46,
+    width: 16,
+    background: '#1b0505',
+    border: '2px solid rgba(0,0,0,.35)',
+    transition: 'height .12s linear',
+  },
+  npcHandLeft: {
+    position: 'absolute',
+    left: 8,
+    bottom: 34,
+    width: 42,
+    height: 11,
+    borderRadius: 999,
+    background: '#9a7657',
+    transformOrigin: '100% 50%',
+  },
+  npcHandRight: {
+    position: 'absolute',
+    right: 8,
+    bottom: 34,
+    width: 42,
+    height: 11,
+    borderRadius: 999,
+    background: '#9a7657',
+    transformOrigin: '0 50%',
+  },
+  dialogMeta: {
+    color: '#79a978',
+    fontSize: 12,
+    fontWeight: 900,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  dialogName: {
+    margin: '8px 0 10px',
+    fontSize: 28,
+    lineHeight: 1.05,
+    fontFamily: 'Georgia, serif',
+  },
+  dialogText: {
+    margin: '0 0 18px',
+    color: '#d8d1c3',
+    fontSize: 15,
+    lineHeight: 1.55,
+  },
+  dialogLore: {
+    margin: '0 0 18px',
+    color: '#ffd37b',
+    fontSize: 14,
+    lineHeight: 1.55,
+    fontWeight: 800,
+  },
+  dialogReply: {
+    margin: '0 0 16px',
+    borderLeft: '3px solid #79a978',
+    padding: '10px 12px',
+    background: 'rgba(121,169,120,.12)',
+    color: '#f6f2e9',
+    fontSize: 14,
+    lineHeight: 1.5,
+    fontWeight: 700,
+  },
+  dialogProgress: {
+    margin: '0 0 10px',
+    color: '#aeb8be',
+    fontSize: 12,
+    fontWeight: 900,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  dialogChoices: {
+    display: 'grid',
+    gap: 10,
+  },
+  dialogButton: {
+    border: '1px solid rgba(255,255,255,.2)',
+    background: 'rgba(255,255,255,.06)',
+    color: '#f6f2e9',
+    borderRadius: 6,
+    padding: '12px 14px',
+    textAlign: 'left',
+    fontWeight: 800,
+    cursor: 'pointer',
+  },
+  taunt: {
+    position: 'absolute',
+    left: '50%',
+    top: 86,
+    transform: 'translateX(-50%)',
+    zIndex: 4,
+    width: 'min(720px, calc(100vw - 32px))',
+    border: '1px solid rgba(255,210,120,.48)',
+    background: 'rgba(22,12,8,.88)',
+    color: '#ffd37b',
+    borderRadius: 8,
+    padding: '16px 20px',
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: 900,
+    boxShadow: '0 18px 50px rgba(0,0,0,.45)',
+    pointerEvents: 'none',
+  },
+  panel: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: 'min(560px, calc(100vw - 32px))',
+    border: '1px solid rgba(255,255,255,.18)',
+    background: 'linear-gradient(180deg, rgba(21,27,33,.96), rgba(12,15,18,.96))',
+    borderRadius: 8,
+    padding: 28,
+    boxShadow: '0 24px 90px rgba(0,0,0,.55)',
+    textAlign: 'center',
+  },
+  eyebrow: { margin: 0, color: '#70d6ff', fontSize: 13, fontWeight: 900, letterSpacing: 2 },
+  title: { margin: '8px 0 10px', fontSize: 36, lineHeight: 1.05 },
+  text: { margin: '0 auto 18px', color: '#d8d1c3', lineHeight: 1.5, maxWidth: 480 },
+  controls: {
+    margin: '0 0 20px',
+    color: '#aeb8be',
+    fontSize: 14,
+    lineHeight: 1.5,
+  },
+  difficultyGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: 8,
+    margin: '0 0 18px',
+  },
+  difficultyButton: {
+    border: '1px solid rgba(255,255,255,.18)',
+    borderRadius: 8,
+    padding: '10px 8px',
+    background: 'rgba(255,255,255,.06)',
+    color: '#d8d1c3',
+    fontWeight: 900,
+  },
+  difficultySelected: {
+    border: '1px solid rgba(255,211,77,.72)',
+    borderRadius: 8,
+    padding: '10px 8px',
+    background: 'rgba(255,211,77,.18)',
+    color: '#ffd37b',
+    fontWeight: 1000,
+  },
+  endingText: {
+    margin: '0 0 18px',
+    padding: '12px 14px',
+    border: '1px solid rgba(255,211,77,.28)',
+    borderRadius: 8,
+    background: 'rgba(255,211,77,.08)',
+    color: '#ffd37b',
+    lineHeight: 1.5,
+    fontWeight: 800,
+  },
+  vision: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 5,
+    pointerEvents: 'none',
+    mixBlendMode: 'screen',
+  },
+  visionBlood: {
+    background: 'radial-gradient(circle at 50% 35%, rgba(190,32,32,.12), rgba(80,0,0,.34) 70%)',
+  },
+  visionEcho: {
+    background: 'radial-gradient(circle at 48% 42%, rgba(140,255,210,.2), rgba(0,70,60,.18) 72%)',
+  },
+  visionWhite: {
+    background: 'rgba(232,237,240,.24)',
+  },
+  play: {
+    border: 0,
+    borderRadius: 8,
+    padding: '13px 30px',
+    background: '#d36a3d',
+    color: '#fff',
+    fontWeight: 900,
+    fontSize: 17,
+  },
+};

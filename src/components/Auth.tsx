@@ -21,7 +21,7 @@ export function Auth({ onPlayAsGuest }: { onPlayAsGuest?: () => void }) {
       if (error) setMessage(error.message);
       else if (mode === 'signup') setMessage('Готово! Проверь почту, если нужна подтверждалка.');
     } catch {
-      setMessage('Что-то пошло не так. Попробуй ещё раз.');
+      setMessage('Что-то пошло не так. Попробуй еще раз.');
     } finally {
       setBusy(false);
     }
@@ -34,7 +34,6 @@ export function Auth({ onPlayAsGuest }: { onPlayAsGuest?: () => void }) {
       display: 'flex', flexDirection: 'column',
       overflow: 'hidden', color: '#e8e6e1',
     }}>
-      {/* ── Постер-фон ── */}
       <div style={{ flex: '1 1 0', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
         <div style={{
           position: 'absolute', inset: 0,
@@ -45,8 +44,8 @@ export function Auth({ onPlayAsGuest }: { onPlayAsGuest?: () => void }) {
           background: 'radial-gradient(ellipse 85% 75% at 50% 38%, transparent 20%, rgba(0,0,0,0.75) 100%)',
         }} />
         <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0, height: '45%', zIndex: 2,
-          background: 'linear-gradient(to top, rgba(4,6,5,0.97) 0%, transparent 100%)',
+          position: 'absolute', bottom: 0, left: 0, right: 0, height: '48%', zIndex: 2,
+          background: 'linear-gradient(to top, rgba(4,6,5,0.98) 0%, transparent 100%)',
         }} />
 
         <svg viewBox="0 0 500 680" style={{
@@ -55,7 +54,6 @@ export function Auth({ onPlayAsGuest }: { onPlayAsGuest?: () => void }) {
           display: 'block',
           filter: 'drop-shadow(0 8px 50px rgba(0,0,0,0.98))',
         }} preserveAspectRatio="xMidYMid meet">
-          {/* Степная растительность */}
           <g fill="#060d08" opacity="0.9">
             <path d="M22 680 Q15 555 8 445 Q11 441 14 445 Q22 555 28 680Z" />
             <path d="M46 680 Q53 580 63 472 Q66 469 69 472 Q62 580 65 680Z" />
@@ -73,38 +71,25 @@ export function Auth({ onPlayAsGuest }: { onPlayAsGuest?: () => void }) {
             <path d="M412 202 Q395 224 379 214" />
           </g>
 
-          {/* Ерлан — высокий, сзади справа */}
           <g fill="#0b0d0b">
             <ellipse cx="295" cy="112" rx="32" ry="36" />
             <path d="M274 146 Q275 167 295 167 Q315 167 316 146Z" />
-            <path d="M242 172
-              Q232 244 228 344 Q224 444 228 574
-              L272 574 Q276 506 283 448 Q289 400 295 377
-              Q301 400 307 448 Q314 506 318 574
-              L362 574 Q366 444 362 344 Q358 244 348 172
-              Q321 162 295 159 Q269 162 242 172Z" />
+            <path d="M242 172 Q232 244 228 344 Q224 444 228 574 L272 574 Q276 506 283 448 Q289 400 295 377 Q301 400 307 448 Q314 506 318 574 L362 574 Q366 444 362 344 Q358 244 348 172 Q321 162 295 159 Q269 162 242 172Z" />
             <path d="M242 184 L195 350 L182 346 L179 366 L210 374 L225 356 L254 198Z" />
             <path d="M348 184 L386 320 L374 324 L345 198Z" />
             <path d="M240 570 L228 680 L254 680 L269 622 L282 680 L306 680 L319 622 L333 680 L360 680 L348 570Z" />
           </g>
 
-          {/* Баха — пониже, впереди слева */}
           <g fill="#0f120f">
             <ellipse cx="178" cy="196" rx="24" ry="27" transform="rotate(-2 178 196)" />
             <path d="M155 219 Q157 236 178 238 Q199 236 201 219 Q189 226 178 226 Q167 226 155 219Z" />
             <path d="M166 223 Q166 241 178 241 Q190 241 190 223Z" />
-            <path d="M144 245
-              Q137 311 135 400 Q133 489 137 594
-              L165 594 Q168 534 173 481 Q177 444 181 424
-              Q185 444 189 481 Q194 534 198 594
-              L226 594 Q230 489 228 400 Q226 311 219 245
-              Q200 237 181 234 Q162 237 144 245Z" />
+            <path d="M144 245 Q137 311 135 400 Q133 489 137 594 L165 594 Q168 534 173 481 Q177 444 181 424 Q185 444 189 481 Q194 534 198 594 L226 594 Q230 489 228 400 Q226 311 219 245 Q200 237 181 234 Q162 237 144 245Z" />
             <path d="M144 257 L112 382 L123 386 L153 271Z" />
             <path d="M219 257 L248 362 L258 357 L229 271Z" />
             <path d="M146 590 L137 680 L160 680 L174 626 L188 680 L212 680 L223 590Z" />
           </g>
 
-          {/* Туман внизу */}
           <defs>
             <linearGradient id="fog" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#040706" stopOpacity="0" />
@@ -113,7 +98,6 @@ export function Auth({ onPlayAsGuest }: { onPlayAsGuest?: () => void }) {
           </defs>
           <rect x="0" y="430" width="500" height="250" fill="url(#fog)" />
 
-          {/* Название */}
           <text x="250" y="600" textAnchor="middle" fill="#ede9e2"
             fontSize="84" fontWeight="900"
             fontFamily="Georgia, 'Times New Roman', serif" letterSpacing="8">
@@ -139,20 +123,53 @@ export function Auth({ onPlayAsGuest }: { onPlayAsGuest?: () => void }) {
         </div>
       </div>
 
-      {/* ── Форма входа ── */}
       <div style={{
         flexShrink: 0,
         background: 'rgba(4,6,5,0.96)',
         borderTop: '1px solid #1a221a',
-        padding: '20px 20px 24px',
+        padding: '14px 20px 24px',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0,
       }}>
+        <section style={{
+          width: 'min(560px, 92vw)',
+          margin: '0 0 14px',
+          border: '1px solid #1f2c21',
+          borderRadius: 6,
+          background: 'rgba(9,15,11,0.78)',
+          padding: '12px 14px',
+          textAlign: 'center',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.28)',
+        }}>
+          <p style={{
+            margin: '0 0 7px',
+            color: '#6ea16f',
+            fontFamily: 'Georgia, serif',
+            fontSize: 12,
+            letterSpacing: '0.28em',
+            textTransform: 'uppercase',
+          }}>
+            История
+          </p>
+          <p style={{
+            margin: 0,
+            color: '#c8c4bc',
+            fontSize: 14,
+            lineHeight: 1.55,
+            fontFamily: 'system-ui',
+          }}>
+            В XIX веке на казахскую степь напали зараженные волки. После укусов вирус
+            разошелся по аулам, и почти все люди превратились в зомби. Выжили только два
+            немного туповатых друга: их спас странный иммунитет от кумыса. Теперь им надо
+            добраться до крепости, раскрыть тайну заражения и, если повезет, спасти мир.
+          </p>
+        </section>
+
         <p style={{
           margin: '0 0 14px', fontSize: 10, letterSpacing: '0.28em',
           textTransform: 'uppercase', opacity: 0.45,
           fontFamily: 'system-ui', fontWeight: 700, color: '#c8c4bc',
         }}>
-          — {mode === 'signin' ? 'Вход в систему' : 'Регистрация'} —
+          - {mode === 'signin' ? 'Вход в систему' : 'Регистрация'} -
         </p>
 
         <form onSubmit={handleSubmit} style={{
@@ -195,7 +212,7 @@ export function Auth({ onPlayAsGuest }: { onPlayAsGuest?: () => void }) {
             textTransform: 'uppercase', fontFamily: 'system-ui',
             opacity: busy ? 0.6 : 1,
           }}>
-            {busy ? '…' : mode === 'signin' ? '▶  Войти' : '▶  Создать аккаунт'}
+            {busy ? '...' : mode === 'signin' ? '▶  Войти' : '▶  Создать аккаунт'}
           </button>
         </form>
 

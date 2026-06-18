@@ -11,27 +11,31 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
-    // 1) текущая сессия при загрузке
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setLoading(false);
     });
-    // 2) подписка на вход/выход
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
     });
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  if (loading) return <main className="container"><p>Загрузка…</p></main>;
+  if (loading) {
+    return (
+      <main className="container">
+        <p>Загрузка...</p>
+      </main>
+    );
+  }
 
   return (
     <main className="container">
       <header className="header">
-        <h1>{playing ? 'QASQYR 🐺' : 'Мой проект 🚀'}</h1>
+        <h1>{playing ? 'QASQYR 3D' : 'Мой проект'}</h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="ghost" onClick={() => setPlaying((p) => !p)}>
-            {playing ? '← Назад' : '🎮 Играть'}
+            {playing ? 'Назад' : 'Играть'}
           </button>
           {session && (
             <button className="ghost" onClick={() => supabase.auth.signOut()}>
@@ -41,7 +45,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Игра — полноэкранный оверлей поверх всего. Иначе — обычный поток входа/приложения. */}
       {playing && <QasqyrGame onExit={() => setPlaying(false)} />}
       {!session ? <Auth onPlayAsGuest={() => setPlaying(true)} /> : <Entries userEmail={session.user.email ?? ''} />}
     </main>
