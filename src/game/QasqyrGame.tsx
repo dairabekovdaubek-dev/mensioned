@@ -12,6 +12,8 @@ type Dimension = 'steppe' | 'hloddev';
 type NpcMood = 'neutral' | 'evil' | 'good';
 type DialogEffect = 'story' | 'heal' | 'medkit' | 'weapon' | 'damage' | 'steal' | 'ambush' | 'trade';
 type Difficulty = 'story' | 'survival' | 'nightmare';
+type MenuTab = 'modes' | 'skins' | 'shop';
+type SkinRarity = 'Common' | 'Rare' | 'Epic' | 'Legendary';
 type VisionKind = '' | 'bloodmoon' | 'echo' | 'whiteout';
 type DayPhase = 'dawn' | 'day' | 'dusk' | 'night';
 type WalkMode = 'walk' | 'sneak' | 'sprint' | 'tired';
@@ -105,6 +107,15 @@ type StoryFlags = {
   cruelty: number;
 };
 
+class KnifeSkin {
+  constructor(
+    public readonly id: string,
+    public readonly name: string,
+    public readonly rarity: SkinRarity,
+    public readonly unlocked: boolean,
+  ) {}
+}
+
 const WORLD_HALF = 140;
 const START_Z = 105;
 const FINISH_Z = -680;
@@ -174,6 +185,33 @@ const DIFFICULTY: Record<Difficulty, {
   story: { label: 'Story', hp: 125, enemyHp: 0.82, enemySpeed: 0.88, enemyDamage: 0.72, spawn: 1.28, eventInterval: 78, score: 0.85 },
   survival: { label: 'Survival', hp: 100, enemyHp: 1, enemySpeed: 1, enemyDamage: 1, spawn: 1, eventInterval: 60, score: 1 },
   nightmare: { label: 'Nightmare', hp: 82, enemyHp: 1.32, enemySpeed: 1.22, enemyDamage: 1.36, spawn: 0.72, eventInterval: 42, score: 1.35 },
+};
+
+const MODE_DESCRIPTIONS: Record<Difficulty, string> = {
+  story: 'Сюжетный режим: больше HP, спокойнее темп, удобнее проходить историю.',
+  survival: 'Выживание: честный баланс ресурсов, врагов и событий.',
+  nightmare: 'Кошмар: меньше HP, агрессивнее враги, больше давление карты.',
+};
+
+const KNIFE_SKINS: KnifeSkin[] = [
+  new KnifeSkin('rust_nomad', 'Rust Nomad', 'Common', true),
+  new KnifeSkin('wolf_fang', 'Wolf Fang', 'Common', true),
+  new KnifeSkin('blue_steppe', 'Blue Steppe', 'Rare', false),
+  new KnifeSkin('kumys_gold', 'Kumys Gold', 'Rare', false),
+  new KnifeSkin('hlooddev_edge', 'Hloddev Edge', 'Epic', false),
+  new KnifeSkin('qasqyr_relic', 'Qasqyr Relic', 'Legendary', false),
+];
+
+const CASE_PRICES = {
+  gold: 250,
+  premium: 15,
+};
+
+const SKIN_RARITY_COLORS: Record<SkinRarity, string> = {
+  Common: '#d8d1c3',
+  Rare: '#70d6ff',
+  Epic: '#d78bff',
+  Legendary: '#ffd37b',
 };
 
 const WEAPONS: Record<WeaponKind, { name: string; damage: number; range: number; cooldown: number; color: number }> = {
@@ -1471,6 +1509,10 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
   const hintRef = useRef('WASD: движение, мышь: прицел, клик/Space: удар');
   const [phase, setPhase] = useState<GamePhase>('intro');
   const [difficulty, setDifficulty] = useState<Difficulty>('survival');
+  const [activeMenuTab, setActiveMenuTab] = useState<MenuTab>('modes');
+  const [selectedKnifeSkinId, setSelectedKnifeSkinId] = useState(KNIFE_SKINS.find((skin) => skin.unlocked)?.id ?? KNIFE_SKINS[0].id);
+  const [wallet, setWallet] = useState({ gold: 900, premium: 45 });
+  const [caseLog, setCaseLog] = useState('Магазин готов: выбери кейс и валюту.');
   const [vision, setVision] = useState<VisionKind>('');
   const [ending, setEnding] = useState('');
   const [taunt, setTaunt] = useState('');
@@ -3047,6 +3089,26 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     onExit?.();
   };
 
+  // UI-ready shop method: hook it to any button by passing a case id and currency flag.
+  const BuyCase = (caseType: string, isPremium: boolean) => {
+    const currency = isPremium ? 'premium' : 'gold';
+    const price = isPremium ? CASE_PRICES.premium : CASE_PRICES.gold;
+    setWallet((current) => {
+      if (current[currency] < price) {
+        const message = `Недостаточно ${isPremium ? 'алмазов' : 'золота'} для кейса ${caseType}. Нужно: ${price}.`;
+        console.log(message);
+        setCaseLog(message);
+        return current;
+      }
+
+      const nextWallet = { ...current, [currency]: current[currency] - price };
+      const message = `Кейс ${caseType} успешно куплен и открыт за ${price} ${isPremium ? 'алмазов' : 'золота'}.`;
+      console.log(message);
+      setCaseLog(message);
+      return nextWallet;
+    });
+  };
+
   const askGeminiHint = async () => {
     if (aiThinking || phase !== 'playing') return;
     setAiThinking(true);
@@ -3283,18 +3345,83 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
           </p>
           {ending && <p style={styles.endingText}>{ending}</p>}
           {phase === 'intro' && (
-            <div style={styles.difficultyGrid}>
-              {(['story', 'survival', 'nightmare'] as Difficulty[]).map((level) => (
-                <button
-                  key={level}
-                  type="button"
-                  onClick={() => setDifficulty(level)}
-                  style={difficulty === level ? styles.difficultySelected : styles.difficultyButton}
-                >
-                  {DIFFICULTY[level].label}
-                </button>
-              ))}
-            </div>
+            <>
+              <div style={styles.menuTabs}>
+                {([
+                  ['modes', 'Режимы'],
+                  ['skins', 'Скины'],
+                  ['shop', 'Магазин'],
+                ] as [MenuTab, string][]).map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveMenuTab(tab)}
+                    style={activeMenuTab === tab ? styles.menuTabActive : styles.menuTab}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {activeMenuTab === 'modes' && (
+                <div style={styles.difficultyGrid}>
+                  {(['story', 'survival', 'nightmare'] as Difficulty[]).map((level) => (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => setDifficulty(level)}
+                      style={difficulty === level ? styles.difficultySelected : styles.difficultyButton}
+                    >
+                      <b>{DIFFICULTY[level].label}</b>
+                      <span>{MODE_DESCRIPTIONS[level]}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {activeMenuTab === 'skins' && (
+                <div style={styles.skinGrid}>
+                  {KNIFE_SKINS.map((skin) => (
+                    <button
+                      key={skin.id}
+                      type="button"
+                      disabled={!skin.unlocked}
+                      onClick={() => setSelectedKnifeSkinId(skin.id)}
+                      style={{
+                        ...styles.skinCard,
+                        borderColor: selectedKnifeSkinId === skin.id ? SKIN_RARITY_COLORS[skin.rarity] : 'rgba(255,255,255,.16)',
+                        opacity: skin.unlocked ? 1 : 0.54,
+                      }}
+                    >
+                      <span style={styles.skinBlade} />
+                      <b>{skin.name}</b>
+                      <small style={{ color: SKIN_RARITY_COLORS[skin.rarity] }}>{skin.rarity}</small>
+                      <span>{skin.unlocked ? (selectedKnifeSkinId === skin.id ? 'Выбран' : 'Разблокирован') : 'Заблокирован'}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {activeMenuTab === 'shop' && (
+                <div style={styles.shopPanel}>
+                  <div style={styles.walletRow}>
+                    <span>Золото: <b>{wallet.gold}</b></span>
+                    <span>Алмазы: <b>{wallet.premium}</b></span>
+                  </div>
+                  <div style={styles.shopGrid}>
+                    <button type="button" onClick={() => BuyCase('Steppe Case', false)} style={styles.shopButton}>
+                      <b>Steppe Case</b>
+                      <span>{CASE_PRICES.gold} золота</span>
+                    </button>
+                    <button type="button" onClick={() => BuyCase('Relic Case', true)} style={styles.shopButtonPremium}>
+                      <b>Relic Case</b>
+                      <span>{CASE_PRICES.premium} алмазов</span>
+                    </button>
+                  </div>
+                  <p style={styles.shopLog}>{caseLog}</p>
+                </div>
+              )}
+            </>
           )}
           <div style={styles.controls}>WASD - движение · мышь - прицел · клик - удар · Space - Хлоддев · Esc - выход</div>
           <button type="button" onClick={start} style={styles.play}>
@@ -4087,7 +4214,7 @@ const styles: Record<string, CSSProperties> = {
     left: '50%',
     top: '50%',
     transform: 'translate(-50%, -50%)',
-    width: 'min(560px, calc(100vw - 32px))',
+    width: 'min(680px, calc(100vw - 32px))',
     border: '1px solid rgba(255,255,255,.18)',
     background: 'linear-gradient(180deg, rgba(21,27,33,.96), rgba(12,15,18,.96))',
     borderRadius: 8,
@@ -4104,6 +4231,30 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 14,
     lineHeight: 1.5,
   },
+  menuTabs: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: 8,
+    margin: '0 0 14px',
+  },
+  menuTab: {
+    border: '1px solid rgba(255,255,255,.16)',
+    borderRadius: 8,
+    padding: '10px 8px',
+    background: 'rgba(255,255,255,.05)',
+    color: '#d8d1c3',
+    fontWeight: 900,
+    cursor: 'pointer',
+  },
+  menuTabActive: {
+    border: '1px solid rgba(112,214,255,.58)',
+    borderRadius: 8,
+    padding: '10px 8px',
+    background: 'rgba(112,214,255,.14)',
+    color: '#d9f7ff',
+    fontWeight: 1000,
+    cursor: 'pointer',
+  },
   difficultyGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
@@ -4117,6 +4268,12 @@ const styles: Record<string, CSSProperties> = {
     background: 'rgba(255,255,255,.06)',
     color: '#d8d1c3',
     fontWeight: 900,
+    minHeight: 104,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 7,
+    justifyContent: 'center',
+    cursor: 'pointer',
   },
   difficultySelected: {
     border: '1px solid rgba(255,211,77,.72)',
@@ -4125,6 +4282,89 @@ const styles: Record<string, CSSProperties> = {
     background: 'rgba(255,211,77,.18)',
     color: '#ffd37b',
     fontWeight: 1000,
+    minHeight: 104,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 7,
+    justifyContent: 'center',
+    cursor: 'pointer',
+  },
+  skinGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: 10,
+    margin: '0 0 18px',
+  },
+  skinCard: {
+    minHeight: 132,
+    border: '1px solid rgba(255,255,255,.16)',
+    borderRadius: 8,
+    background: 'rgba(255,255,255,.055)',
+    color: '#f6f2e9',
+    padding: 10,
+    display: 'grid',
+    justifyItems: 'center',
+    alignContent: 'center',
+    gap: 6,
+    cursor: 'pointer',
+  },
+  skinBlade: {
+    width: 58,
+    height: 12,
+    borderRadius: '12px 2px 2px 12px',
+    background: 'linear-gradient(90deg, #15191d 0 18%, #d8dde4 18% 78%, #8fa3b2 78%)',
+    boxShadow: '0 0 18px rgba(112,214,255,.14)',
+    transform: 'rotate(-18deg)',
+  },
+  shopPanel: {
+    display: 'grid',
+    gap: 10,
+    margin: '0 0 18px',
+  },
+  walletRow: {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: 18,
+    color: '#d8d1c3',
+    fontWeight: 800,
+  },
+  shopGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 10,
+  },
+  shopButton: {
+    border: '1px solid rgba(255,211,77,.34)',
+    borderRadius: 8,
+    background: 'rgba(255,211,77,.1)',
+    color: '#ffd37b',
+    padding: '14px 12px',
+    display: 'grid',
+    gap: 6,
+    fontWeight: 900,
+    cursor: 'pointer',
+  },
+  shopButtonPremium: {
+    border: '1px solid rgba(112,214,255,.42)',
+    borderRadius: 8,
+    background: 'rgba(112,214,255,.12)',
+    color: '#d9f7ff',
+    padding: '14px 12px',
+    display: 'grid',
+    gap: 6,
+    fontWeight: 900,
+    cursor: 'pointer',
+  },
+  shopLog: {
+    minHeight: 40,
+    margin: 0,
+    padding: '10px 12px',
+    border: '1px solid rgba(255,255,255,.14)',
+    borderRadius: 8,
+    background: 'rgba(0,0,0,.16)',
+    color: '#d8d1c3',
+    fontSize: 13,
+    lineHeight: 1.35,
   },
   endingText: {
     margin: '0 0 18px',
