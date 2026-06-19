@@ -28,7 +28,7 @@ type Enemy = {
 type CharacterAnimationName = 'idle' | 'walk' | 'attack';
 type OutfitRole = 'player' | 'enemy' | 'npc';
 type OutfitKind = 'maleRanger' | 'femaleRanger' | 'malePeasant' | 'femalePeasant';
-type MedievalPropKind = 'wagon' | 'crate' | 'woodFence' | 'metalFence' | 'roundDoor' | 'roundRoof' | 'vine';
+type MedievalPropKind = 'wagon' | 'crate' | 'woodFence' | 'metalFence' | 'roundDoor' | 'roundRoof' | 'vine' | 'chimney';
 
 type CharacterAnimator = {
   mixer: THREE.AnimationMixer;
@@ -158,6 +158,7 @@ const MEDIEVAL_PROP_URLS: Record<MedievalPropKind, string> = {
   roundDoor: '/models/medieval/Door_1_Round.gltf',
   roundRoof: '/models/medieval/Roof_2x4_RoundTile.gltf',
   vine: '/models/medieval/Prop_Vine1.gltf',
+  chimney: '/models/medieval/Prop_Chimney.gltf',
 };
 
 const DIFFICULTY: Record<Difficulty, {
@@ -402,6 +403,8 @@ function makeOutfitInstance(template: THREE.Group, role: OutfitRole) {
   const outfit = cloneSkeleton(template) as THREE.Group;
   outfit.traverse((part) => {
     if (!(part instanceof THREE.Mesh)) return;
+    part.visible = true;
+    part.frustumCulled = false;
     part.castShadow = true;
     part.receiveShadow = true;
     part.material = cloneMaterial(part.material);
@@ -1994,6 +1997,8 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       root.position.set(0, -0.08, 0.04);
       root.rotation.y = Math.PI;
       mesh.add(root);
+      mesh.userData.outfitCompanion = !!template;
+      mesh.userData.outfitRoot = root;
       mesh.position.set(playerRef.current.x - 2.2, terrainHeightAt(playerRef.current.x, playerRef.current.z), playerRef.current.z + 2.4);
       scene.add(mesh);
       companionMesh = mesh;
@@ -2008,6 +2013,28 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       companionAnimator = undefined;
       if (companionMesh) scene.remove(companionMesh);
       companionMesh = null;
+    };
+    const replaceCompanionFallback = () => {
+      if (!companionMesh || !companionRecruitedRef.current || !companionAliveRef.current) return;
+      if (companionMesh.userData.outfitCompanion) {
+        const root = companionMesh.userData.outfitRoot as THREE.Object3D | undefined;
+        if (!companionAnimator && root && animationClips.length > 0) {
+          companionAnimator = createCharacterAnimator(root, animationClips) ?? undefined;
+          if (companionAnimator) {
+            assetMixers.push(companionAnimator.mixer);
+            playCharacterAnimation(companionAnimator, 'idle', 0);
+          }
+        }
+        return;
+      }
+      const position = companionMesh.position.clone();
+      const rotation = companionMesh.rotation.clone();
+      removeCompanionModel();
+      ensureCompanionModel();
+      if (companionMesh) {
+        companionMesh.position.copy(position);
+        companionMesh.rotation.copy(rotation);
+      }
     };
     const replaceFallbackEnemies = () => {
       if (enemyTemplatePool().length === 0) return;
@@ -2086,6 +2113,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
         if (kind === 'roundDoor') addMedievalProp(kind, npc.x, npc.z - 3.82, 1.1, npc.x < 0 ? -0.28 : 0.28);
         if (kind === 'roundRoof' && npc.id % 2 === 1) addMedievalProp(kind, npc.x, npc.z, 1.15, Math.PI / 2 + (npc.x < 0 ? -0.28 : 0.28));
         if (kind === 'vine' && npc.mood !== 'evil') addMedievalProp(kind, npc.x + side * 3.8, npc.z - 3.95, 1.5, side * 0.2);
+        if (kind === 'chimney') addMedievalProp(kind, npc.x + side * 2.35, npc.z + 0.7, 1.05, side * 0.12);
       }
 
       for (const fake of fakeFortressesRef.current) {
@@ -2094,6 +2122,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
           addMedievalProp(kind, fake.x + 8, fake.z + 7, 1.8, Math.PI / 2);
         }
         if (kind === 'crate') addMedievalProp(kind, fake.x + 5, fake.z + 5, 1.1, fake.id * 0.4);
+        if (kind === 'chimney') addMedievalProp(kind, fake.x - 4, fake.z - 3, 1.25, fake.id * 0.25);
       }
     };
 
@@ -2111,6 +2140,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
 
           replaceFallbackEnemies();
           replaceFallbackNpcs();
+          replaceCompanionFallback();
         },
         undefined,
         () => {
@@ -2145,6 +2175,8 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
         animationClips = gltf.animations;
         attachPlayerAnimator();
         replaceFallbackEnemies();
+        replaceFallbackNpcs();
+        replaceCompanionFallback();
         animationGuide = gltf.scene;
         animationGuide.name = 'Universal Animation Library Guide';
         fitAssetHeight(animationGuide, 2.95);
