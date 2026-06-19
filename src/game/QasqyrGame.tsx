@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { supabase } from '../lib/supabase';
 
 type WeaponKind = 'knife' | 'club' | 'sabre' | 'rifle';
 type PickupKind = 'medkit' | 'crystal' | 'key' | 'code' | WeaponKind;
@@ -1424,6 +1425,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
   const [taunt, setTaunt] = useState('');
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [jumpscare, setJumpscare] = useState(false);
+  const [aiThinking, setAiThinking] = useState(false);
   const [hud, setHud] = useState({
     hp: 100,
     score: 0,
@@ -2822,6 +2824,51 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     onExit?.();
   };
 
+  const askGeminiHint = async () => {
+    if (aiThinking || phase !== 'playing') return;
+    setAiThinking(true);
+    const inventory = inventoryRef.current.length > 0
+      ? inventoryRef.current.map((item) => `${ITEM_LABELS[item.kind]} x${item.count}`).join(', ')
+      : 'пусто';
+    const prompt = [
+      `HP: ${Math.ceil(hpRef.current)}`,
+      `Оружие: ${WEAPONS[weaponRef.current].name}`,
+      `Предмет в руке: ${ITEM_LABELS[heldItemRef.current]}`,
+      `Инвентарь: ${inventory}`,
+      `Есть ключ: ${keyRef.current.collected ? 'да' : 'нет'}`,
+      `Есть код: ${codeRef.current.collected ? 'да' : 'нет'}`,
+      `Дистанция до ключа: ${questNav(playerRef.current, keyRef.current).distance} м`,
+      `Дистанция до кода: ${questNav(playerRef.current, codeRef.current).distance} м`,
+      `Врагов рядом: ${enemiesRef.current.length}`,
+      `Ивент: ${eventKindRef.current ? EVENT_LABELS[eventKindRef.current] : 'нет'}`,
+      `Сложность: ${DIFFICULTY[difficultyRef.current].label}`,
+      `Измерение: ${dimensionRef.current}`,
+      `Очки сюжета: ${storyScore(storyFlagsRef.current)}`,
+    ].join('\n');
+
+    try {
+      hintRef.current = 'Gemini думает над советом...';
+      setHud((current) => ({ ...current, hint: hintRef.current }));
+      const { data, error } = await supabase.functions.invoke('ai', {
+        body: {
+          system: 'Ты внутриигровой помощник survival-игры QASQYR. Дай один короткий практичный совет на русском, максимум 2 предложения. Не пересказывай правила.',
+          prompt,
+        },
+      });
+      if (error) throw error;
+      const text = typeof data?.text === 'string' && data.text.trim()
+        ? data.text.trim()
+        : 'Gemini не дал ответ. Попробуй еще раз через пару секунд.';
+      hintRef.current = `Gemini 2.5: ${text}`;
+      setHud((current) => ({ ...current, hint: hintRef.current }));
+    } catch {
+      hintRef.current = 'Gemini сейчас не ответил. Проверь секрет GEMINI_API_KEY и деплой функции ai.';
+      setHud((current) => ({ ...current, hint: hintRef.current }));
+    } finally {
+      setAiThinking(false);
+    }
+  };
+
   const handleDialogChoice = (choice: NpcChoice) => {
     if (dialog && dialog.step < 2) {
       storyFlagsRef.current.lore += 1;
@@ -2920,6 +2967,9 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
             <div style={styles.stat}><b>Измерение</b><span>{hud.dimensionLeft > 0 ? `${hud.dimension} ${hud.dimensionLeft}с` : hud.dimension}</span></div>
             <div style={styles.stat}><b>Space</b><span>{hud.teleport > 0 ? `${hud.teleport}с` : 'Хлоддев'}</span></div>
             <div style={styles.stat}><b>{hud.event || 'Ивент'}</b><span>{hud.event ? `${hud.eventLeft}с` : `${hud.nextEvent}с`}</span></div>
+            <button type="button" onClick={askGeminiHint} disabled={aiThinking} style={styles.aiButton}>
+              {aiThinking ? 'Gemini...' : 'Gemini 2.5'}
+            </button>
             <div style={styles.hint}>{hud.hint}</div>
           </div>
 
@@ -3172,6 +3222,17 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     justifyContent: 'center',
+  },
+  aiButton: {
+    minHeight: 58,
+    border: '1px solid rgba(112,214,255,.46)',
+    background: 'rgba(12,38,48,.82)',
+    color: '#d9f7ff',
+    borderRadius: 8,
+    padding: '9px 12px',
+    fontWeight: 900,
+    cursor: 'pointer',
+    pointerEvents: 'auto',
   },
   hint: {
     gridColumn: '1 / -1',
