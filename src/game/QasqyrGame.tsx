@@ -25,6 +25,9 @@ type Enemy = {
 };
 
 type CharacterAnimationName = 'idle' | 'walk' | 'attack';
+type OutfitRole = 'player' | 'enemy' | 'npc';
+type OutfitKind = 'maleRanger' | 'femaleRanger' | 'malePeasant' | 'femalePeasant';
+type MedievalPropKind = 'wagon' | 'crate' | 'woodFence' | 'metalFence' | 'roundDoor' | 'roundRoof' | 'vine';
 
 type CharacterAnimator = {
   mixer: THREE.AnimationMixer;
@@ -119,8 +122,22 @@ const CHUNK_RADIUS = 2;
 const FAR_WORLD_LIMIT = 100000;
 const DAY_LENGTH = 210;
 const STAMINA_MAX = 100;
-const PLAYER_OUTFIT_URL = '/models/outfits/male-ranger/Male_Ranger.gltf';
+const OUTFIT_URLS: Record<OutfitKind, string> = {
+  maleRanger: '/models/outfits/fantasy/Male_Ranger.gltf',
+  femaleRanger: '/models/outfits/fantasy/Female_Ranger.gltf',
+  malePeasant: '/models/outfits/fantasy/Male_Peasant.gltf',
+  femalePeasant: '/models/outfits/fantasy/Female_Peasant.gltf',
+};
 const ANIMATION_LIBRARY_URL = '/models/animations/ual2-standard.glb';
+const MEDIEVAL_PROP_URLS: Record<MedievalPropKind, string> = {
+  wagon: '/models/medieval/Prop_Wagon.gltf',
+  crate: '/models/medieval/Prop_Crate.gltf',
+  woodFence: '/models/medieval/Prop_WoodenFence_Single.gltf',
+  metalFence: '/models/medieval/Prop_MetalFence_Simple.gltf',
+  roundDoor: '/models/medieval/Door_1_Round.gltf',
+  roundRoof: '/models/medieval/Roof_2x4_RoundTile.gltf',
+  vine: '/models/medieval/Prop_Vine1.gltf',
+};
 
 const DIFFICULTY: Record<Difficulty, {
   label: string;
@@ -358,7 +375,7 @@ function cloneMaterial(material: THREE.Material | THREE.Material[]) {
   return Array.isArray(material) ? material.map((entry) => entry.clone()) : material.clone();
 }
 
-function makeOutfitInstance(template: THREE.Group, kind: 'player' | 'enemy') {
+function makeOutfitInstance(template: THREE.Group, role: OutfitRole) {
   const outfit = cloneSkeleton(template) as THREE.Group;
   outfit.traverse((part) => {
     if (!(part instanceof THREE.Mesh)) return;
@@ -367,16 +384,30 @@ function makeOutfitInstance(template: THREE.Group, kind: 'player' | 'enemy') {
     part.material = cloneMaterial(part.material);
     const materials = Array.isArray(part.material) ? part.material : [part.material];
     for (const material of materials) {
-      if (kind === 'enemy' && material instanceof THREE.MeshStandardMaterial) {
+      if (role === 'enemy' && material instanceof THREE.MeshStandardMaterial) {
         material.color.multiplyScalar(0.58);
         material.emissive.setHex(0x25120f);
         material.emissiveIntensity = 0.18;
         material.roughness = Math.min(1, material.roughness + 0.16);
+      } else if (role === 'npc' && material instanceof THREE.MeshStandardMaterial) {
+        material.color.multiplyScalar(1.08);
+        material.roughness = Math.min(1, material.roughness + 0.08);
       }
     }
   });
-  outfit.name = kind === 'player' ? 'Male Ranger Player' : 'Infected Ranger Enemy';
+  outfit.name = role === 'player' ? 'Player Outfit' : role === 'enemy' ? 'Infected Outfit' : 'Village NPC Outfit';
   return outfit;
+}
+
+function makeAssetInstance(template: THREE.Group) {
+  const asset = template.clone(true);
+  asset.traverse((part) => {
+    if (part instanceof THREE.Mesh) {
+      part.castShadow = true;
+      part.receiveShadow = true;
+    }
+  });
+  return asset;
 }
 
 function makeEnemy() {
@@ -1525,6 +1556,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     }
 
     const physicsObstacles: PhysicsObstacle[] = [];
+    const npcFigures: { npc: HouseNpc; mesh: THREE.Group; animator?: CharacterAnimator }[] = [];
     const addObstacle = (obstacle: PhysicsObstacle) => physicsObstacles.push(obstacle);
 
     scene.add(makeFortress(0, FINISH_Z - 10, false));
@@ -1543,6 +1575,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       const figure = makeNpcFigure(npc.mood);
       figure.position.set(npc.x, 0, npc.z - 4.8);
       scene.add(figure);
+      npcFigures.push({ npc, mesh: figure });
     }
 
     const worldChunks = new Map<string, THREE.Group>();
@@ -1693,7 +1726,8 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     scene.add(player);
     const gltfLoader = new GLTFLoader();
     const assetMixers: THREE.AnimationMixer[] = [];
-    let outfitTemplate: THREE.Group | null = null;
+    const outfitTemplates: Partial<Record<OutfitKind, THREE.Group>> = {};
+    const medievalPropTemplates: Partial<Record<MedievalPropKind, THREE.Group>> = {};
     let outfitModel: THREE.Group | null = null;
     let animationClips: THREE.AnimationClip[] = [];
     let playerAnimator: CharacterAnimator | null = null;
@@ -1713,11 +1747,25 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       const index = assetMixers.indexOf(mixer);
       if (index >= 0) assetMixers.splice(index, 1);
     };
+    const enemyTemplatePool = () => [
+      outfitTemplates.femalePeasant,
+      outfitTemplates.malePeasant,
+      outfitTemplates.femaleRanger,
+      outfitTemplates.maleRanger,
+    ].filter((template): template is THREE.Group => !!template);
+    const npcTemplateFor = (npc: HouseNpc) => {
+      if (npc.mood === 'evil') return outfitTemplates.maleRanger ?? outfitTemplates.femaleRanger ?? outfitTemplates.malePeasant ?? outfitTemplates.femalePeasant;
+      return npc.id % 2 === 0
+        ? outfitTemplates.malePeasant ?? outfitTemplates.femalePeasant ?? outfitTemplates.maleRanger
+        : outfitTemplates.femalePeasant ?? outfitTemplates.malePeasant ?? outfitTemplates.femaleRanger;
+    };
     const createEnemyModel = () => {
-      if (!outfitTemplate) return { mesh: makeEnemy(), animator: undefined };
+      const templates = enemyTemplatePool();
+      const template = templates.length > 0 ? templates[Math.floor(Math.random() * templates.length)] : null;
+      if (!template) return { mesh: makeEnemy(), animator: undefined };
 
       const mesh = new THREE.Group();
-      const outfit = makeOutfitInstance(outfitTemplate, 'enemy');
+      const outfit = makeOutfitInstance(template, 'enemy');
       outfit.position.set(0, -0.08, 0.04);
       outfit.rotation.y = Math.PI;
       mesh.add(outfit);
@@ -1740,8 +1788,26 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       }
       return { mesh, animator };
     };
+    const createNpcModel = (npc: HouseNpc) => {
+      const template = npcTemplateFor(npc);
+      if (!template) return { mesh: makeNpcFigure(npc.mood), animator: undefined };
+      const mesh = new THREE.Group();
+      const outfit = makeOutfitInstance(template, 'npc');
+      outfit.position.set(0, -0.08, 0.04);
+      outfit.rotation.y = Math.PI;
+      mesh.add(outfit);
+      mesh.userData.outfitNpc = true;
+      mesh.userData.outfitRoot = outfit;
+
+      const animator = animationClips.length > 0 ? createCharacterAnimator(outfit, animationClips, npc.mood === 'evil') ?? undefined : undefined;
+      if (animator) {
+        assetMixers.push(animator.mixer);
+        playCharacterAnimation(animator, npc.mood === 'evil' ? 'walk' : 'idle', 0);
+      }
+      return { mesh, animator };
+    };
     const replaceFallbackEnemies = () => {
-      if (!outfitTemplate) return;
+      if (enemyTemplatePool().length === 0) return;
       for (const enemy of enemiesRef.current) {
         if (enemy.mesh.userData.outfitEnemy) {
           const root = enemy.mesh.userData.outfitRoot as THREE.Object3D | undefined;
@@ -1765,31 +1831,119 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
         enemy.animator = animator;
       }
     };
-
-    gltfLoader.load(
-      PLAYER_OUTFIT_URL,
-      (gltf) => {
-        if (stopped) return;
-        outfitTemplate = gltf.scene;
-        fitAssetHeight(outfitTemplate, 3.05);
-        outfitModel = makeOutfitInstance(outfitTemplate, 'player');
-        outfitModel.position.set(0, -0.08, 0.04);
-        outfitModel.rotation.y = Math.PI;
-        enableAssetShadows(outfitModel);
-        player.add(outfitModel);
-        attachPlayerAnimator();
-        replaceFallbackEnemies();
-
-        for (const part of player.children) {
-          if (part !== outfitModel && part !== hloodAura && part !== blade) part.visible = false;
+    const replaceFallbackNpcs = () => {
+      for (const entry of npcFigures) {
+        if (entry.mesh.userData.outfitNpc) {
+          const root = entry.mesh.userData.outfitRoot as THREE.Object3D | undefined;
+          if (!entry.animator && root && animationClips.length > 0) {
+            entry.animator = createCharacterAnimator(root, animationClips, entry.npc.mood === 'evil') ?? undefined;
+            if (entry.animator) {
+              assetMixers.push(entry.animator.mixer);
+              playCharacterAnimation(entry.animator, entry.npc.mood === 'evil' ? 'walk' : 'idle', 0);
+            }
+          }
+          continue;
         }
-      },
-      undefined,
-      () => {
-        hintRef.current = 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ ranger outfit. РРіСЂР° РїРѕРєР°Р·С‹РІР°РµС‚ fallback-РіРµСЂРѕСЏ.';
-        setHud((h) => ({ ...h, hint: hintRef.current }));
-      },
-    );
+
+        const previous = entry.mesh;
+        const { mesh, animator } = createNpcModel(entry.npc);
+        mesh.position.copy(previous.position);
+        mesh.rotation.copy(previous.rotation);
+        scene.add(mesh);
+        scene.remove(previous);
+        entry.mesh = mesh;
+        entry.animator = animator;
+      }
+    };
+    const placedMedievalDecor = new Set<MedievalPropKind>();
+    const addMedievalProp = (kind: MedievalPropKind, x: number, z: number, scale: number, rotation = 0) => {
+      const template = medievalPropTemplates[kind];
+      if (!template) return;
+      const prop = makeAssetInstance(template);
+      prop.position.set(x, terrainHeightAt(x, z), z);
+      prop.rotation.y = rotation;
+      prop.scale.setScalar(scale);
+      scene.add(prop);
+    };
+    const placeMedievalDecor = (kind: MedievalPropKind) => {
+      if (placedMedievalDecor.has(kind) || !medievalPropTemplates[kind]) return;
+      placedMedievalDecor.add(kind);
+
+      for (const npc of houseNpcsRef.current) {
+        const side = npc.x < 0 ? -1 : 1;
+        if (kind === 'wagon' && npc.id % 3 === 0) addMedievalProp(kind, npc.x + side * 7.8, npc.z - 1.6, 1.35, side * 0.7);
+        if (kind === 'crate') {
+          addMedievalProp(kind, npc.x - side * 4.6, npc.z - 5.9, 0.9 + (npc.id % 3) * 0.12, npc.id * 0.8);
+          if (npc.id % 2 === 0) addMedievalProp(kind, npc.x - side * 5.6, npc.z - 5.2, 0.72, npc.id * 0.45);
+        }
+        if (kind === 'woodFence') {
+          addMedievalProp(kind, npc.x - 4.2, npc.z + 4.9, 1.2, Math.PI / 2);
+          addMedievalProp(kind, npc.x + 4.2, npc.z + 4.9, 1.2, Math.PI / 2);
+        }
+        if (kind === 'roundDoor') addMedievalProp(kind, npc.x, npc.z - 3.82, 1.1, npc.x < 0 ? -0.28 : 0.28);
+        if (kind === 'roundRoof' && npc.id % 2 === 1) addMedievalProp(kind, npc.x, npc.z, 1.15, Math.PI / 2 + (npc.x < 0 ? -0.28 : 0.28));
+        if (kind === 'vine' && npc.mood !== 'evil') addMedievalProp(kind, npc.x + side * 3.8, npc.z - 3.95, 1.5, side * 0.2);
+      }
+
+      for (const fake of fakeFortressesRef.current) {
+        if (kind === 'metalFence') {
+          addMedievalProp(kind, fake.x - 8, fake.z + 7, 1.8, Math.PI / 2);
+          addMedievalProp(kind, fake.x + 8, fake.z + 7, 1.8, Math.PI / 2);
+        }
+        if (kind === 'crate') addMedievalProp(kind, fake.x + 5, fake.z + 5, 1.1, fake.id * 0.4);
+      }
+    };
+
+    for (const [kind, url] of Object.entries(OUTFIT_URLS) as [OutfitKind, string][]) {
+      gltfLoader.load(
+        url,
+        (gltf) => {
+          if (stopped) return;
+          const template = gltf.scene;
+          fitAssetHeight(template, 3.05);
+          enableAssetShadows(template);
+          outfitTemplates[kind] = template;
+
+          if (kind === 'maleRanger' && !outfitModel) {
+            outfitModel = makeOutfitInstance(template, 'player');
+            outfitModel.position.set(0, -0.08, 0.04);
+            outfitModel.rotation.y = Math.PI;
+            player.add(outfitModel);
+            attachPlayerAnimator();
+
+            for (const part of player.children) {
+              if (part !== outfitModel && part !== hloodAura && part !== blade) part.visible = false;
+            }
+          }
+
+          replaceFallbackEnemies();
+          replaceFallbackNpcs();
+        },
+        undefined,
+        () => {
+          hintRef.current = 'Не удалось загрузить один из fantasy outfit ассетов. Игра использует fallback-модель.';
+          setHud((h) => ({ ...h, hint: hintRef.current }));
+        },
+      );
+    }
+
+    for (const [kind, url] of Object.entries(MEDIEVAL_PROP_URLS) as [MedievalPropKind, string][]) {
+      gltfLoader.load(
+        url,
+        (gltf) => {
+          if (stopped) return;
+          const template = gltf.scene;
+          enableAssetShadows(template);
+          medievalPropTemplates[kind] = template;
+          placeMedievalDecor(kind);
+        },
+        undefined,
+        () => {
+          hintRef.current = 'Не удалось загрузить часть Medieval Village декора.';
+          setHud((h) => ({ ...h, hint: hintRef.current }));
+        },
+      );
+    }
 
     gltfLoader.load(
       ANIMATION_LIBRARY_URL,
