@@ -5,12 +5,12 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { supabase } from '../lib/supabase';
 
 type WeaponKind = 'knife' | 'club' | 'sabre' | 'rifle';
-type PickupKind = 'medkit' | 'crystal' | 'key' | 'code' | WeaponKind;
+type PickupKind = 'medkit' | 'crystal' | 'key' | 'code' | 'revive' | WeaponKind;
 type EventKind = 'ambush' | 'storm' | 'rage' | 'starvation';
 type GamePhase = 'intro' | 'playing' | 'won' | 'lost';
 type Dimension = 'steppe' | 'hloddev';
 type NpcMood = 'neutral' | 'evil' | 'good';
-type DialogEffect = 'story' | 'heal' | 'medkit' | 'weapon' | 'damage' | 'steal' | 'ambush';
+type DialogEffect = 'story' | 'heal' | 'medkit' | 'weapon' | 'damage' | 'steal' | 'ambush' | 'trade';
 type Difficulty = 'story' | 'survival' | 'nightmare';
 type VisionKind = '' | 'bloodmoon' | 'echo' | 'whiteout';
 type DayPhase = 'dawn' | 'day' | 'dusk' | 'night';
@@ -123,6 +123,21 @@ const CHUNK_RADIUS = 2;
 const FAR_WORLD_LIMIT = 100000;
 const DAY_LENGTH = 210;
 const STAMINA_MAX = 100;
+const TRADER_NPC_ID = 8;
+const TRADER_PRICE_MEDKITS = 5;
+const COMPANION_HOUSE: HouseNpc = {
+  id: 99,
+  name: 'Саят',
+  mood: 'good',
+  x: -24,
+  z: -455,
+  title: 'Дом второго игрока',
+  story: 'В доме сидит Саят. Он говорит, что слышит степь как карту и может идти рядом, если ты не боишься доверять живому голосу.',
+  choices: [
+    { text: 'Позвать Саята в команду', reply: 'Саят берет оружие и выходит рядом с тобой. Теперь он помогает в бою и подсказывает дорогу.', effect: 'story' },
+  ],
+  visited: false,
+};
 const OUTFIT_URLS: Record<OutfitKind, string> = {
   maleRanger: '/models/outfits/fantasy/Male_Ranger.gltf',
   femaleRanger: '/models/outfits/fantasy/Female_Ranger.gltf',
@@ -172,6 +187,7 @@ const ITEM_LABELS: Record<PickupKind, string> = {
   crystal: 'Кристалл',
   key: 'Ключ',
   code: 'Код',
+  revive: 'Сыворотка',
   knife: 'Нож',
   club: 'Дубина',
   sabre: 'Сабля',
@@ -183,6 +199,7 @@ const ITEM_ICONS: Record<PickupKind, string> = {
   crystal: '*',
   key: 'K',
   code: '#',
+  revive: 'V',
   knife: '/',
   club: '!',
   sabre: 'S',
@@ -564,6 +581,19 @@ function makePickup(kind: PickupKind) {
     shard.position.set(0.42, 0.12, 0.05);
     shard.rotation.z = -0.45;
     group.add(core, shard);
+  } else if (kind === 'revive') {
+    const vial = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.22, 0.92, 16),
+      new THREE.MeshStandardMaterial({ color: 0x8cffb8, emissive: 0x1c8f55, emissiveIntensity: 0.55, roughness: 0.24, transparent: true, opacity: 0.82 }),
+    );
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.16, 16), darkMetal);
+    const glow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.34, 16, 10),
+      new THREE.MeshBasicMaterial({ color: 0x8cffb8, transparent: true, opacity: 0.22 }),
+    );
+    vial.position.y = 0.12;
+    cap.position.y = 0.66;
+    group.add(vial, cap, glow);
   } else if (kind === 'key') {
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.07, 10, 24), new THREE.MeshStandardMaterial({ color: 0xffd34d, metalness: 0.55, roughness: 0.24, emissive: 0x3d2a00, emissiveIntensity: 0.2 }));
     const stem = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.88), ring.material);
@@ -1199,6 +1229,10 @@ function questNav(player: THREE.Vector3, quest: QuestItem) {
   return { distance, angle };
 }
 
+function navPoint(x: number, z: number): QuestItem {
+  return { x, z, collected: false };
+}
+
 function addInventoryItem(items: InventoryEntry[], kind: PickupKind) {
   const existing = items.find((item) => item.kind === kind);
   if (existing) existing.count += 1;
@@ -1318,6 +1352,7 @@ function heldItemColor(kind: PickupKind) {
   if (isWeapon(kind)) return WEAPONS[kind].color;
   if (kind === 'medkit') return 0xf4f1e8;
   if (kind === 'crystal') return 0x79e6ff;
+  if (kind === 'revive') return 0x8cffb8;
   if (kind === 'key') return 0xffc857;
   return 0xd2b48c;
 }
@@ -1328,6 +1363,7 @@ function heldItemScale(kind: PickupKind) {
   if (kind === 'club') return { x: 1.15, y: 1.15, z: 1 };
   if (kind === 'medkit') return { x: 2.5, y: 2.1, z: 0.34 };
   if (kind === 'crystal') return { x: 1.4, y: 1.4, z: 0.52 };
+  if (kind === 'revive') return { x: 1.35, y: 1.35, z: 0.62 };
   if (kind === 'key') return { x: 1.1, y: 0.8, z: 0.62 };
   if (kind === 'code') return { x: 2.2, y: 1.35, z: 0.24 };
   return { x: 0.82, y: 0.82, z: 0.82 };
@@ -1400,6 +1436,13 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
   const houseNpcsRef = useRef<HouseNpc[]>([]);
   const insideHouseRef = useRef<number | null>(null);
   const exitHouseBurstRef = useRef(0);
+  const traderCoordsBoughtRef = useRef(false);
+  const companionRecruitedRef = useRef(false);
+  const companionAliveRef = useRef(false);
+  const companionHpRef = useRef(100);
+  const companionAttackCdRef = useRef(0);
+  const companionFinalSpokenRef = useRef(false);
+  const reviveRef = useRef<QuestItem>({ x: 0, z: 0, collected: true });
   const keyRef = useRef<QuestItem>(randomQuestPoint());
   const codeRef = useRef<QuestItem>(randomQuestPoint());
   const hpRef = useRef(100);
@@ -1451,6 +1494,13 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     dimensionLeft: 0,
     hasKey: false,
     hasCode: false,
+    traderNav: questNav(playerRef.current, navPoint(HOUSE_NPCS.find((npc) => npc.id === TRADER_NPC_ID)?.x ?? 0, HOUSE_NPCS.find((npc) => npc.id === TRADER_NPC_ID)?.z ?? 0)),
+    companionNav: questNav(playerRef.current, navPoint(COMPANION_HOUSE.x, COMPANION_HOUSE.z)),
+    reviveNav: questNav(playerRef.current, reviveRef.current),
+    coordsBought: false,
+    companionRecruited: false,
+    companionAlive: false,
+    reviveVisible: false,
     keyNav: questNav(playerRef.current, keyRef.current),
     codeNav: questNav(playerRef.current, codeRef.current),
     inventory: [] as InventoryEntry[],
@@ -1470,6 +1520,13 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     houseNpcsRef.current = HOUSE_NPCS.map((npc) => ({ ...npc, visited: false }));
     insideHouseRef.current = null;
     exitHouseBurstRef.current = 0;
+    traderCoordsBoughtRef.current = false;
+    companionRecruitedRef.current = false;
+    companionAliveRef.current = false;
+    companionHpRef.current = 100;
+    companionAttackCdRef.current = 0;
+    companionFinalSpokenRef.current = false;
+    reviveRef.current = { x: randomRange(-WORLD_HALF + 16, WORLD_HALF - 16), z: randomRange(FINISH_Z + 70, START_Z - 90), collected: true };
     keyRef.current = randomQuestPoint();
     codeRef.current = randomQuestPoint();
     hpRef.current = balance.hp;
@@ -1517,6 +1574,13 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       dimensionLeft: 0,
       hasKey: false,
       hasCode: false,
+      traderNav: questNav(playerRef.current, navPoint(HOUSE_NPCS.find((npc) => npc.id === TRADER_NPC_ID)?.x ?? 0, HOUSE_NPCS.find((npc) => npc.id === TRADER_NPC_ID)?.z ?? 0)),
+      companionNav: questNav(playerRef.current, navPoint(COMPANION_HOUSE.x, COMPANION_HOUSE.z)),
+      reviveNav: questNav(playerRef.current, reviveRef.current),
+      coordsBought: false,
+      companionRecruited: false,
+      companionAlive: false,
+      reviveVisible: false,
       keyNav: questNav(playerRef.current, keyRef.current),
       codeNav: questNav(playerRef.current, codeRef.current),
       inventory: [...inventoryRef.current],
@@ -1666,6 +1730,18 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       scene.add(figure);
       npcFigures.push({ npc, mesh: figure });
     }
+    const companionHouse = makeHouse(COMPANION_HOUSE.mood);
+    companionHouse.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z);
+    companionHouse.rotation.y = 0.18;
+    scene.add(companionHouse);
+    addObstacle({ key: 'companion-house', x: COMPANION_HOUSE.x, z: COMPANION_HOUSE.z, radius: 5.2, kind: 'solid' });
+    const companionDoorGlow = new THREE.PointLight(0x8cffb8, 1.25, 20, 2);
+    companionDoorGlow.position.set(COMPANION_HOUSE.x, 2.6, COMPANION_HOUSE.z - 4.6);
+    scene.add(companionDoorGlow);
+    const companionHouseFigure = makeNpcFigure(COMPANION_HOUSE.mood);
+    companionHouseFigure.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z - 4.8);
+    scene.add(companionHouseFigure);
+    npcFigures.push({ npc: COMPANION_HOUSE, mesh: companionHouseFigure });
 
     const worldChunks = new Map<string, THREE.Group>();
     const updateWorldChunks = () => {
@@ -1820,6 +1896,8 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     let outfitModel: THREE.Group | null = null;
     let animationClips: THREE.AnimationClip[] = [];
     let playerAnimator: CharacterAnimator | null = null;
+    let companionMesh: THREE.Group | null = null;
+    let companionAnimator: CharacterAnimator | undefined;
     let animationGuide: THREE.Group | null = null;
     let stopped = false;
     const playerOutfitKind = PLAYER_OUTFIT_BY_DIFFICULTY[difficultyRef.current];
@@ -1907,6 +1985,29 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
         playCharacterAnimation(animator, npc.mood === 'evil' ? 'walk' : 'idle', 0);
       }
       return { mesh, animator };
+    };
+    const ensureCompanionModel = () => {
+      if (companionMesh || !companionRecruitedRef.current || !companionAliveRef.current) return;
+      const template = outfitTemplates.malePeasant ?? outfitTemplates.femalePeasant ?? outfitTemplates.femaleRanger ?? outfitTemplates.maleRanger;
+      const mesh = new THREE.Group();
+      const root = template ? makeOutfitInstance(template, 'npc') : makeNpcFigure('good');
+      root.position.set(0, -0.08, 0.04);
+      root.rotation.y = Math.PI;
+      mesh.add(root);
+      mesh.position.set(playerRef.current.x - 2.2, terrainHeightAt(playerRef.current.x, playerRef.current.z), playerRef.current.z + 2.4);
+      scene.add(mesh);
+      companionMesh = mesh;
+      companionAnimator = template && animationClips.length > 0 ? createCharacterAnimator(root, animationClips) ?? undefined : undefined;
+      if (companionAnimator) {
+        assetMixers.push(companionAnimator.mixer);
+        playCharacterAnimation(companionAnimator, 'idle', 0);
+      }
+    };
+    const removeCompanionModel = () => {
+      if (companionAnimator) removeMixer(companionAnimator.mixer);
+      companionAnimator = undefined;
+      if (companionMesh) scene.remove(companionMesh);
+      companionMesh = null;
     };
     const replaceFallbackEnemies = () => {
       if (enemyTemplatePool().length === 0) return;
@@ -2508,7 +2609,12 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
             break;
           }
         }
+        if (!insideHouseRef.current && traderCoordsBoughtRef.current && !companionRecruitedRef.current) {
+          const dist = Math.hypot(playerRef.current.x - COMPANION_HOUSE.x, playerRef.current.z - COMPANION_HOUSE.z);
+          if (dist < 8.5) enterHouse(COMPANION_HOUSE);
+        }
       }
+      companionHouseFigure.visible = !companionRecruitedRef.current;
 
       player.position.copy(playerRef.current);
       player.rotation.y = playerYaw;
@@ -2552,6 +2658,39 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       const heldWeapon = isWeapon(heldItemRef.current) ? WEAPONS[heldItemRef.current] : null;
       blade.rotation.x = heldWeapon && attackCdRef.current > heldWeapon.cooldown * 0.55 ? -0.9 : -0.25;
 
+      ensureCompanionModel();
+      companionAttackCdRef.current = Math.max(0, companionAttackCdRef.current - dt);
+      if (companionMesh && companionAliveRef.current) {
+        const followOffset = new THREE.Vector3(-Math.cos(playerYaw) * 2.2 + Math.sin(playerYaw) * 1.6, 0, Math.sin(playerYaw) * 2.2 + Math.cos(playerYaw) * 1.6);
+        const target = playerRef.current.clone().add(followOffset);
+        const toTarget = new THREE.Vector3().subVectors(target, companionMesh.position);
+        toTarget.y = 0;
+        const companionMoving = toTarget.length() > 1.4;
+        if (companionMoving) {
+          toTarget.normalize();
+          companionMesh.position.addScaledVector(toTarget, PLAYER_SPEED * 0.82 * dt);
+          companionMesh.rotation.y = Math.atan2(toTarget.x, toTarget.z);
+        }
+        companionMesh.position.y = terrainHeightAt(companionMesh.position.x, companionMesh.position.z);
+        playCharacterAnimation(companionAnimator, companionMoving ? 'walk' : 'idle');
+
+        let nearest: Enemy | null = null;
+        let nearestDist = Infinity;
+        for (const enemy of enemiesRef.current) {
+          const dist = enemy.mesh.position.distanceTo(companionMesh.position);
+          if (dist < nearestDist) {
+            nearest = enemy;
+            nearestDist = dist;
+          }
+        }
+        if (nearest && nearestDist < 7.2 && companionAttackCdRef.current <= 0) {
+          nearest.hp -= 18 * (dimensionRef.current === 'hloddev' ? 1.2 : 1);
+          nearest.hitTimer = 0.16;
+          companionAttackCdRef.current = 0.62;
+          playCharacterAnimation(companionAnimator, 'attack', 0.05);
+        }
+      }
+
       for (let i = dustPuffs.length - 1; i >= 0; i--) {
         const puff = dustPuffs[i];
         puff.age += dt;
@@ -2576,6 +2715,25 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
         const dist = pickup.mesh.position.distanceTo(playerRef.current);
         if (dist > 2.25) return true;
         scene.remove(pickup.mesh);
+        if (pickup.kind === 'revive') {
+          reviveRef.current.collected = true;
+          companionAliveRef.current = true;
+          companionHpRef.current = 100;
+          ensureCompanionModel();
+          scoreRef.current += 25;
+          hintRef.current = 'Сыворотка сработала: Саят снова в строю.';
+          setTaunt('Саят: Я слышал темноту. Спасибо, что нашел меня.');
+          setTimeout(() => setTaunt(''), 4200);
+          setHud((h) => ({
+            ...h,
+            score: scoreRef.current,
+            companionAlive: true,
+            reviveVisible: false,
+            reviveNav: questNav(playerRef.current, reviveRef.current),
+            hint: hintRef.current,
+          }));
+          return false;
+        }
         inventoryRef.current = addInventoryItem(inventoryRef.current, pickup.kind);
         const pickedSlot = inventoryRef.current.findIndex((item) => item.kind === pickup.kind);
 
@@ -2656,6 +2814,23 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
         const mat = enemy.mesh.children[0] instanceof THREE.Mesh ? enemy.mesh.children[0].material : null;
         if (mat instanceof THREE.MeshStandardMaterial) mat.color.set(enemy.hitTimer > 0 ? 0xfff1dc : inHloddev ? 0x2c6c82 : activeEvent === 'rage' ? 0xa72f26 : 0x793f34);
         if (dist < PLAYER_RADIUS + ENEMY_RADIUS) hpRef.current -= enemy.damage * (activeEvent === 'rage' ? 1.55 : 1) * (inHloddev ? 0.62 : 1) * dt;
+        if (companionMesh && companionAliveRef.current) {
+          const companionDist = enemy.mesh.position.distanceTo(companionMesh.position);
+          if (companionDist < PLAYER_RADIUS + ENEMY_RADIUS + 0.4) {
+            companionHpRef.current -= enemy.damage * 0.82 * dt;
+            if (companionHpRef.current <= 0) {
+              companionAliveRef.current = false;
+              companionHpRef.current = 0;
+              reviveRef.current = randomQuestPoint();
+              reviveRef.current.collected = false;
+              addPickup('revive', reviveRef.current.x, reviveRef.current.z);
+              removeCompanionModel();
+              hintRef.current = 'Саят упал. На карте появилась стрелка к сыворотке, которая оживит тиммейта.';
+              setTaunt(hintRef.current);
+              setTimeout(() => setTaunt(''), 4800);
+            }
+          }
+        }
       }
 
       enemiesRef.current = enemiesRef.current.filter((enemy) => {
@@ -2766,6 +2941,13 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
         dimensionLeft: Math.max(0, Math.ceil(dimensionTimerRef.current)),
         hasKey: keyRef.current.collected,
         hasCode: codeRef.current.collected,
+        traderNav: questNav(playerRef.current, navPoint(HOUSE_NPCS.find((npc) => npc.id === TRADER_NPC_ID)?.x ?? 0, HOUSE_NPCS.find((npc) => npc.id === TRADER_NPC_ID)?.z ?? 0)),
+        companionNav: questNav(playerRef.current, navPoint(COMPANION_HOUSE.x, COMPANION_HOUSE.z)),
+        reviveNav: questNav(playerRef.current, reviveRef.current),
+        coordsBought: traderCoordsBoughtRef.current,
+        companionRecruited: companionRecruitedRef.current,
+        companionAlive: companionAliveRef.current,
+        reviveVisible: companionRecruitedRef.current && !companionAliveRef.current && !reviveRef.current.collected,
         keyNav: questNav(playerRef.current, keyRef.current),
         codeNav: questNav(playerRef.current, codeRef.current),
         inventory: [...inventoryRef.current],
@@ -2790,6 +2972,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
           endingRef.current = endingFor(storyFlagsRef.current, difficultyRef.current, scoreRef.current);
           setEnding(endingRef.current);
           setPhase('won');
+          void askCompanionFinalLine(endingRef.current);
         } else {
           playerRef.current.z = FINISH_Z + 13;
           hintRef.current = 'Ворота закрыты. Нужны и ключ, и код.';
@@ -2877,8 +3060,28 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     }
   };
 
+  const askCompanionFinalLine = async (endingText: string) => {
+    if (!companionRecruitedRef.current || !companionAliveRef.current || companionFinalSpokenRef.current) return;
+    companionFinalSpokenRef.current = true;
+    try {
+      const { data, error } = await supabase.functions.invoke('ai', {
+        body: {
+          system: 'Ты Саят, второй игрок и 3D-напарник в survival-игре QASQYR. Скажи одну короткую эмоциональную фразу на русском после финала. Не больше 18 слов.',
+          prompt: `Финал игрока: ${endingText}. Сложность: ${DIFFICULTY[difficultyRef.current].label}. Очки: ${scoreRef.current}.`,
+        },
+      });
+      if (error) throw error;
+      const text = typeof data?.text === 'string' && data.text.trim()
+        ? data.text.trim()
+        : 'Мы дошли. Значит, степь еще помнит наши имена.';
+      setEnding(`${endingText}\n\nСаят: ${text}`);
+    } catch {
+      setEnding(`${endingText}\n\nСаят: Мы дошли. Значит, степь еще помнит наши имена.`);
+    }
+  };
+
   const handleDialogChoice = (choice: NpcChoice) => {
-    if (dialog && dialog.step < 2) {
+    if (dialog && dialog.step < 2 && choice.effect !== 'trade' && dialog.npc.id !== COMPANION_HOUSE.id) {
       storyFlagsRef.current.lore += 1;
       scoreRef.current += 3;
       hintRef.current = choice.reply;
@@ -2892,7 +3095,34 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     }
 
     const activeNpcId = dialog?.npc.id;
-    if (choice.effect === 'heal') {
+    let reply = choice.reply;
+    if (choice.effect === 'trade') {
+      const medkits = inventoryRef.current.find((item) => item.kind === 'medkit');
+      if (!medkits || medkits.count < TRADER_PRICE_MEDKITS) {
+        reply = `Жанату нужно ${TRADER_PRICE_MEDKITS} аптечек. Собери их и вернись к лавке.`;
+        hintRef.current = reply;
+        setDialog(dialog ? { ...dialog, lastReply: reply } : null);
+        setHud((h) => ({
+          ...h,
+          inventory: [...inventoryRef.current],
+          hint: hintRef.current,
+        }));
+        return;
+      }
+      medkits.count -= TRADER_PRICE_MEDKITS;
+      if (medkits.count <= 0) inventoryRef.current = inventoryRef.current.filter((item) => item !== medkits);
+      traderCoordsBoughtRef.current = true;
+      storyFlagsRef.current.risk += 1;
+      scoreRef.current += 20;
+    } else if (activeNpcId === COMPANION_HOUSE.id) {
+      companionRecruitedRef.current = true;
+      companionAliveRef.current = true;
+      companionHpRef.current = 100;
+      reviveRef.current.collected = true;
+      storyFlagsRef.current.trust += 2;
+      scoreRef.current += 30;
+      reply = 'Саят выходит из дома и становится вторым игроком. Он будет держаться рядом, атаковать зараженных и давать голос Gemini 2.5.';
+    } else if (choice.effect === 'heal') {
       storyFlagsRef.current.trust += 2;
       hpRef.current = Math.min(DIFFICULTY[difficultyRef.current].hp, hpRef.current + 30);
       scoreRef.current += 10;
@@ -2935,10 +3165,10 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       const npc = houseNpcsRef.current.find((item) => item.id === activeNpcId);
       if (npc) npc.visited = true;
     }
-    if (choice.effect !== 'ambush') exitHouseBurstRef.current = 4 + Math.floor(Math.random() * 5);
+    if (activeNpcId !== COMPANION_HOUSE.id && choice.effect !== 'ambush' && choice.effect !== 'trade') exitHouseBurstRef.current = 4 + Math.floor(Math.random() * 5);
     insideHouseRef.current = null;
-    hintRef.current = choice.reply;
-    setTaunt(choice.reply);
+    hintRef.current = reply;
+    setTaunt(reply);
     setTimeout(() => setTaunt(''), 4200);
     setDialog(null);
     setHud((h) => ({
@@ -2950,6 +3180,12 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       heldItem: ITEM_LABELS[heldItemRef.current],
       selectedSlot: selectedSlotRef.current,
       inventory: [...inventoryRef.current],
+      coordsBought: traderCoordsBoughtRef.current,
+      companionRecruited: companionRecruitedRef.current,
+      companionAlive: companionAliveRef.current,
+      reviveVisible: companionRecruitedRef.current && !companionAliveRef.current && !reviveRef.current.collected,
+      companionNav: questNav(playerRef.current, navPoint(COMPANION_HOUSE.x, COMPANION_HOUSE.z)),
+      reviveNav: questNav(playerRef.current, reviveRef.current),
       hint: hintRef.current,
     }));
   };
@@ -2984,6 +3220,10 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
           <div style={styles.questPanel}>
             <QuestArrow label="Ключ" done={hud.hasKey} nav={hud.keyNav} />
             <QuestArrow label="Код" done={hud.hasCode} nav={hud.codeNav} />
+            {!hud.coordsBought && <QuestArrow label="Торговец" done={false} nav={hud.traderNav} />}
+            {hud.coordsBought && !hud.companionRecruited && <QuestArrow label="Дом Саята" done={false} nav={hud.companionNav} />}
+            {hud.reviveVisible && <QuestArrow label="Сыворотка" done={false} nav={hud.reviveNav} />}
+            {hud.companionRecruited && <div style={styles.fortressDistance}>Саят: {hud.companionAlive ? 'в строю' : 'ранен'}</div>}
             <div style={styles.fortressDistance}>Крепость: {hud.distance}% пути</div>
           </div>
 
@@ -3123,6 +3363,15 @@ function npcLoreThread(npc: HouseNpc) {
 }
 
 function dialogStepChoices(npc: HouseNpc, step: number): NpcChoice[] {
+  if (npc.id === TRADER_NPC_ID && step === 0) {
+    return [
+      { text: 'Купить координаты за 5 аптечек', reply: 'Жанат считает аптечки и рисует на обрывке карты дом Саята. На компасе появилась новая стрелка.', effect: 'trade' },
+      ...npc.choices,
+    ];
+  }
+  if (npc.id === COMPANION_HOUSE.id) {
+    return npc.choices;
+  }
   if (step === 0) {
     return [
       { text: 'Спросить, что случилось в первую ночь', reply: `${npc.name} говорит тише: в ту ночь волки не выли, а будто повторяли чужой приказ. Вирус шел за звуком, как за дудкой.`, effect: 'story' },
