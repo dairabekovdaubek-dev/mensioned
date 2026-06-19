@@ -129,6 +129,11 @@ const OUTFIT_URLS: Record<OutfitKind, string> = {
   malePeasant: '/models/outfits/fantasy/Male_Peasant.gltf',
   femalePeasant: '/models/outfits/fantasy/Female_Peasant.gltf',
 };
+const PLAYER_OUTFIT_BY_DIFFICULTY: Record<Difficulty, OutfitKind> = {
+  story: 'femalePeasant',
+  survival: 'maleRanger',
+  nightmare: 'femaleRanger',
+};
 const ANIMATION_LIBRARY_URL = '/models/animations/ual2-standard.glb';
 const MEDIEVAL_PROP_URLS: Record<MedievalPropKind, string> = {
   wagon: '/models/medieval/Prop_Wagon.gltf',
@@ -1817,6 +1822,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     let playerAnimator: CharacterAnimator | null = null;
     let animationGuide: THREE.Group | null = null;
     let stopped = false;
+    const playerOutfitKind = PLAYER_OUTFIT_BY_DIFFICULTY[difficultyRef.current];
 
     const attachPlayerAnimator = () => {
       if (!outfitModel || playerAnimator || animationClips.length === 0) return;
@@ -1824,6 +1830,18 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       if (playerAnimator) {
         assetMixers.push(playerAnimator.mixer);
         playCharacterAnimation(playerAnimator, 'idle', 0);
+      }
+    };
+    const attachPlayerOutfit = (template: THREE.Group) => {
+      if (outfitModel) return;
+      outfitModel = makeOutfitInstance(template, 'player');
+      outfitModel.position.set(0, -0.08, 0.04);
+      outfitModel.rotation.y = Math.PI;
+      player.add(outfitModel);
+      attachPlayerAnimator();
+
+      for (const part of player.children) {
+        if (part !== outfitModel && part !== hloodAura && part !== blade) part.visible = false;
       }
     };
     const removeMixer = (mixer: THREE.AnimationMixer | undefined) => {
@@ -1988,17 +2006,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
           enableAssetShadows(template);
           outfitTemplates[kind] = template;
 
-          if (kind === 'maleRanger' && !outfitModel) {
-            outfitModel = makeOutfitInstance(template, 'player');
-            outfitModel.position.set(0, -0.08, 0.04);
-            outfitModel.rotation.y = Math.PI;
-            player.add(outfitModel);
-            attachPlayerAnimator();
-
-            for (const part of player.children) {
-              if (part !== outfitModel && part !== hloodAura && part !== blade) part.visible = false;
-            }
-          }
+          if (kind === playerOutfitKind) attachPlayerOutfit(template);
 
           replaceFallbackEnemies();
           replaceFallbackNpcs();
