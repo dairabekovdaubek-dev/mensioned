@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 type WeaponKind = 'knife' | 'club' | 'sabre' | 'rifle';
 type PickupKind = 'medkit' | 'crystal' | 'key' | 'code' | WeaponKind;
@@ -19,6 +21,15 @@ type Enemy = {
   speed: number;
   damage: number;
   hitTimer: number;
+  animator?: CharacterAnimator;
+};
+
+type CharacterAnimationName = 'idle' | 'walk' | 'attack';
+
+type CharacterAnimator = {
+  mixer: THREE.AnimationMixer;
+  actions: Partial<Record<CharacterAnimationName, THREE.AnimationAction>>;
+  active: CharacterAnimationName | null;
 };
 
 type Pickup = {
@@ -108,6 +119,8 @@ const CHUNK_RADIUS = 2;
 const FAR_WORLD_LIMIT = 100000;
 const DAY_LENGTH = 210;
 const STAMINA_MAX = 100;
+const PLAYER_OUTFIT_URL = '/models/outfits/male-ranger/Male_Ranger.gltf';
+const ANIMATION_LIBRARY_URL = '/models/animations/ual2-standard.glb';
 
 const DIFFICULTY: Record<Difficulty, {
   label: string;
@@ -285,6 +298,85 @@ function randomQuestPoint(): QuestItem {
     z: randomRange(FINISH_Z + 62, START_Z - 75),
     collected: false,
   };
+}
+
+function findAnimationClip(clips: THREE.AnimationClip[], names: string[]) {
+  for (const name of names) {
+    const clip = THREE.AnimationClip.findByName(clips, name);
+    if (clip) return clip;
+  }
+  return null;
+}
+
+function createCharacterAnimator(root: THREE.Object3D, clips: THREE.AnimationClip[], zombie = false): CharacterAnimator | null {
+  const idle = findAnimationClip(clips, zombie ? ['Zombie_Idle_Loop', 'Idle_No_Loop'] : ['Idle_Lantern_Loop', 'Idle_FoldArms_Loop', 'Idle_No_Loop']);
+  const walk = findAnimationClip(clips, zombie ? ['Zombie_Walk_Fwd_Loop', 'Walk_Carry_Loop'] : ['Walk_Carry_Loop', 'Zombie_Walk_Fwd_Loop']);
+  const attack = findAnimationClip(clips, zombie ? ['Zombie_Scratch', 'Melee_Hook'] : ['Sword_Regular_A', 'Melee_Hook']);
+  if (!idle && !walk && !attack) return null;
+
+  const mixer = new THREE.AnimationMixer(root);
+  const actions: CharacterAnimator['actions'] = {};
+  if (idle) actions.idle = mixer.clipAction(idle);
+  if (walk) actions.walk = mixer.clipAction(walk);
+  if (attack) {
+    actions.attack = mixer.clipAction(attack);
+    actions.attack.setLoop(THREE.LoopOnce, 1);
+    actions.attack.clampWhenFinished = false;
+  }
+  return { mixer, actions, active: null };
+}
+
+function playCharacterAnimation(animator: CharacterAnimator | undefined | null, name: CharacterAnimationName, fade = 0.18) {
+  if (!animator) return;
+  const next = animator.actions[name];
+  if (!next || animator.active === name) return;
+  const previous = animator.active ? animator.actions[animator.active] : null;
+  next.enabled = true;
+  next.reset();
+  next.play();
+  if (previous) next.crossFadeFrom(previous, fade, false);
+  animator.active = name;
+}
+
+function enableAssetShadows(asset: THREE.Object3D) {
+  asset.traverse((part) => {
+    if (part instanceof THREE.Mesh) {
+      part.castShadow = true;
+      part.receiveShadow = true;
+    }
+  });
+}
+
+function fitAssetHeight(asset: THREE.Object3D, targetHeight: number) {
+  const bounds = new THREE.Box3().setFromObject(asset);
+  const height = bounds.max.y - bounds.min.y;
+  if (height <= 0) return;
+  asset.scale.multiplyScalar(targetHeight / height);
+}
+
+function cloneMaterial(material: THREE.Material | THREE.Material[]) {
+  return Array.isArray(material) ? material.map((entry) => entry.clone()) : material.clone();
+}
+
+function makeOutfitInstance(template: THREE.Group, kind: 'player' | 'enemy') {
+  const outfit = cloneSkeleton(template) as THREE.Group;
+  outfit.traverse((part) => {
+    if (!(part instanceof THREE.Mesh)) return;
+    part.castShadow = true;
+    part.receiveShadow = true;
+    part.material = cloneMaterial(part.material);
+    const materials = Array.isArray(part.material) ? part.material : [part.material];
+    for (const material of materials) {
+      if (kind === 'enemy' && material instanceof THREE.MeshStandardMaterial) {
+        material.color.multiplyScalar(0.58);
+        material.emissive.setHex(0x25120f);
+        material.emissiveIntensity = 0.18;
+        material.roughness = Math.min(1, material.roughness + 0.16);
+      }
+    }
+  });
+  outfit.name = kind === 'player' ? 'Male Ranger Player' : 'Infected Ranger Enemy';
+  return outfit;
 }
 
 function makeEnemy() {
@@ -1599,6 +1691,136 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     blade.position.set(0.82, 1.45, -0.8);
     player.add(playerBody, shirtFront, playerHead, hair, nose, leftEye, rightEye, mouth, hat, belt, pack, scarf, hloodAura, blade);
     scene.add(player);
+    const gltfLoader = new GLTFLoader();
+    const assetMixers: THREE.AnimationMixer[] = [];
+    let outfitTemplate: THREE.Group | null = null;
+    let outfitModel: THREE.Group | null = null;
+    let animationClips: THREE.AnimationClip[] = [];
+    let playerAnimator: CharacterAnimator | null = null;
+    let animationGuide: THREE.Group | null = null;
+    let stopped = false;
+
+    const attachPlayerAnimator = () => {
+      if (!outfitModel || playerAnimator || animationClips.length === 0) return;
+      playerAnimator = createCharacterAnimator(outfitModel, animationClips);
+      if (playerAnimator) {
+        assetMixers.push(playerAnimator.mixer);
+        playCharacterAnimation(playerAnimator, 'idle', 0);
+      }
+    };
+    const removeMixer = (mixer: THREE.AnimationMixer | undefined) => {
+      if (!mixer) return;
+      const index = assetMixers.indexOf(mixer);
+      if (index >= 0) assetMixers.splice(index, 1);
+    };
+    const createEnemyModel = () => {
+      if (!outfitTemplate) return { mesh: makeEnemy(), animator: undefined };
+
+      const mesh = new THREE.Group();
+      const outfit = makeOutfitInstance(outfitTemplate, 'enemy');
+      outfit.position.set(0, -0.08, 0.04);
+      outfit.rotation.y = Math.PI;
+      mesh.add(outfit);
+      mesh.userData.outfitEnemy = true;
+      mesh.userData.outfitRoot = outfit;
+      mesh.userData.phase = randomRange(0, Math.PI * 2);
+      mesh.userData.baseRotZ = 0;
+
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffede2 });
+      const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), eyeMat);
+      const rightEye = leftEye.clone();
+      leftEye.position.set(-0.13, 2.55, -0.4);
+      rightEye.position.set(0.13, 2.55, -0.4);
+      mesh.add(leftEye, rightEye);
+
+      const animator = animationClips.length > 0 ? createCharacterAnimator(outfit, animationClips, true) ?? undefined : undefined;
+      if (animator) {
+        assetMixers.push(animator.mixer);
+        playCharacterAnimation(animator, 'walk', 0);
+      }
+      return { mesh, animator };
+    };
+    const replaceFallbackEnemies = () => {
+      if (!outfitTemplate) return;
+      for (const enemy of enemiesRef.current) {
+        if (enemy.mesh.userData.outfitEnemy) {
+          const root = enemy.mesh.userData.outfitRoot as THREE.Object3D | undefined;
+          if (!enemy.animator && root && animationClips.length > 0) {
+            enemy.animator = createCharacterAnimator(root, animationClips, true) ?? undefined;
+            if (enemy.animator) {
+              assetMixers.push(enemy.animator.mixer);
+              playCharacterAnimation(enemy.animator, 'walk', 0);
+            }
+          }
+          continue;
+        }
+        const previous = enemy.mesh;
+        const { mesh, animator } = createEnemyModel();
+        mesh.position.copy(previous.position);
+        mesh.rotation.copy(previous.rotation);
+        mesh.userData.outfitEnemy = true;
+        scene.add(mesh);
+        scene.remove(previous);
+        enemy.mesh = mesh;
+        enemy.animator = animator;
+      }
+    };
+
+    gltfLoader.load(
+      PLAYER_OUTFIT_URL,
+      (gltf) => {
+        if (stopped) return;
+        outfitTemplate = gltf.scene;
+        fitAssetHeight(outfitTemplate, 3.05);
+        outfitModel = makeOutfitInstance(outfitTemplate, 'player');
+        outfitModel.position.set(0, -0.08, 0.04);
+        outfitModel.rotation.y = Math.PI;
+        enableAssetShadows(outfitModel);
+        player.add(outfitModel);
+        attachPlayerAnimator();
+        replaceFallbackEnemies();
+
+        for (const part of player.children) {
+          if (part !== outfitModel && part !== hloodAura && part !== blade) part.visible = false;
+        }
+      },
+      undefined,
+      () => {
+        hintRef.current = 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ ranger outfit. РРіСЂР° РїРѕРєР°Р·С‹РІР°РµС‚ fallback-РіРµСЂРѕСЏ.';
+        setHud((h) => ({ ...h, hint: hintRef.current }));
+      },
+    );
+
+    gltfLoader.load(
+      ANIMATION_LIBRARY_URL,
+      (gltf) => {
+        if (stopped) return;
+        animationClips = gltf.animations;
+        attachPlayerAnimator();
+        replaceFallbackEnemies();
+        animationGuide = gltf.scene;
+        animationGuide.name = 'Universal Animation Library Guide';
+        fitAssetHeight(animationGuide, 2.95);
+        enableAssetShadows(animationGuide);
+        scene.add(animationGuide);
+        animationGuide.visible = false;
+
+        const mixer = new THREE.AnimationMixer(animationGuide);
+        const clip =
+          findAnimationClip(gltf.animations, ['Walk_Carry_Loop', 'Idle_Lantern_Loop', 'Zombie_Walk_Fwd_Loop']) ??
+          gltf.animations[0];
+        if (clip) {
+          const action = mixer.clipAction(clip);
+          action.play();
+          assetMixers.push(mixer);
+        }
+      },
+      undefined,
+      () => {
+        hintRef.current = 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ Universal Animation Library.';
+        setHud((h) => ({ ...h, hint: hintRef.current }));
+      },
+    );
     const playerShadow = new THREE.Mesh(
       new THREE.CircleGeometry(1.25, 28),
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false }),
@@ -1628,7 +1850,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     };
 
     const addEnemy = (nearPlayer = true) => {
-      const mesh = makeEnemy();
+      const { mesh, animator } = createEnemyModel();
       const angle = randomRange(0, Math.PI * 2);
       const radius = randomRange(32, 72);
       const x = nearPlayer ? playerRef.current.x + Math.cos(angle) * radius : randomRange(-WORLD_HALF + 8, WORLD_HALF - 8);
@@ -1641,11 +1863,15 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
         speed: (6.2 + Math.random() * 3.2) * balance.enemySpeed,
         damage: 17 * balance.enemyDamage,
         hitTimer: 0,
+        animator,
       });
     };
 
     const clearEnemies = () => {
-      for (const enemy of enemiesRef.current) scene.remove(enemy.mesh);
+      for (const enemy of enemiesRef.current) {
+        removeMixer(enemy.animator?.mixer);
+        scene.remove(enemy.mesh);
+      }
       enemiesRef.current = [];
     };
 
@@ -1687,7 +1913,6 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     const clock = new THREE.Clock();
     const music = createDynamicMusic();
     let raf = 0;
-    let stopped = false;
     let playerWalkTime = 0;
     let playerYaw = Math.PI;
     let cameraYaw = Math.PI;
@@ -1716,6 +1941,12 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       const weapon = WEAPONS[held];
       if (attackCdRef.current > 0) return;
       attackCdRef.current = weapon.cooldown;
+      const attackAction = playerAnimator?.actions.attack;
+      if (attackAction) {
+        attackAction.reset();
+        attackAction.timeScale = 1.25;
+        attackAction.play();
+      }
       let hit = false;
 
       for (const enemy of enemiesRef.current) {
@@ -1904,6 +2135,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     const loop = () => {
       if (stopped) return;
       const dt = Math.min(clock.getDelta(), 0.045);
+      for (const mixer of assetMixers) mixer.update(dt);
       const activeEvent = eventKindRef.current;
       const inHloddev = dimensionRef.current === 'hloddev';
       const insideHouse = insideHouseRef.current !== null;
@@ -2034,6 +2266,19 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
 
       player.position.copy(playerRef.current);
       player.rotation.y = playerYaw;
+      if (animationGuide) {
+        const guideSide = new THREE.Vector3(Math.cos(playerYaw), 0, -Math.sin(playerYaw));
+        const guideBack = new THREE.Vector3(-Math.sin(playerYaw), 0, -Math.cos(playerYaw));
+        animationGuide.position.copy(playerRef.current);
+        animationGuide.position.addScaledVector(guideSide, -2.25);
+        animationGuide.position.addScaledVector(guideBack, 1.35);
+        animationGuide.position.y = terrainHeightAt(animationGuide.position.x, animationGuide.position.z);
+        animationGuide.rotation.y = playerYaw + 0.08;
+        animationGuide.visible = false;
+      }
+      playCharacterAnimation(playerAnimator, playerMoving ? 'walk' : 'idle');
+      const playerAction = playerAnimator?.active ? playerAnimator.actions[playerAnimator.active] : null;
+      if (playerAction) playerAction.timeScale = playerMoving ? (sprint ? 1.5 : sneak ? 0.62 : 0.92 + speedRatio * 0.28) : 0.82;
       aimRef.current.set(Math.sin(playerYaw), Math.cos(playerYaw)).normalize();
       const localSideSpeed = playerVelocityRef.current.x * Math.cos(playerYaw) - playerVelocityRef.current.z * Math.sin(playerYaw);
       const localForwardSpeed = playerVelocityRef.current.x * Math.sin(playerYaw) + playerVelocityRef.current.z * Math.cos(playerYaw);
@@ -2147,6 +2392,9 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
           enemy.mesh.rotation.y = Math.atan2(dir.x, dir.z);
           enemyMoving = true;
         }
+        playCharacterAnimation(enemy.animator, enemyMoving ? 'walk' : 'idle');
+        const enemyAction = enemy.animator?.active ? enemy.animator.actions[enemy.animator.active] : null;
+        if (enemyAction) enemyAction.timeScale = enemyMoving ? (activeEvent === 'rage' ? 1.35 : 0.92) : 0.72;
         const walkParts = enemy.mesh.userData.walkParts as { part: THREE.Object3D; side: number; baseX: number; baseZ: number }[] | undefined;
         enemy.mesh.userData.phase = (enemy.mesh.userData.phase ?? 0) + dt * (enemyMoving ? 7.2 : 2.2);
         const zombieStep = Math.sin(enemy.mesh.userData.phase);
@@ -2166,6 +2414,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
 
       enemiesRef.current = enemiesRef.current.filter((enemy) => {
         if (enemy.hp > 0) return true;
+        removeMixer(enemy.animator?.mixer);
         scene.remove(enemy.mesh);
         scoreRef.current += 25;
         if (Math.random() < 0.48) addPickup('medkit', enemy.mesh.position.x, enemy.mesh.position.z);
