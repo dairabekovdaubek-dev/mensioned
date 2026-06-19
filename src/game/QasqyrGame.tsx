@@ -1048,6 +1048,77 @@ function resolvePlayerPhysics(position: THREE.Vector3, velocity: THREE.Vector3, 
   return waterDrag;
 }
 
+function makeSteppeGrassPatch(cx: number, cz: number, count: number) {
+  const geometry = new THREE.ConeGeometry(0.13, 1, 4);
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x5d6b3f,
+    roughness: 0.98,
+    metalness: 0,
+    vertexColors: true,
+  });
+  const grass = new THREE.InstancedMesh(geometry, material, count);
+  const matrix = new THREE.Matrix4();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const color = new THREE.Color();
+
+  for (let i = 0; i < count; i++) {
+    const x = chunkRandom(cx, cz, 400 + i * 3, -CHUNK_SIZE * 0.48, CHUNK_SIZE * 0.48);
+    const z = chunkRandom(cx, cz, 401 + i * 3, -CHUNK_SIZE * 0.48, CHUNK_SIZE * 0.48);
+    const worldX = cx * CHUNK_SIZE + x;
+    const worldZ = cz * CHUNK_SIZE + z;
+    const height = terrainHeightAt(worldX, worldZ);
+    const bladeHeight = chunkRandom(cx, cz, 402 + i * 3, 0.45, 1.55);
+    const lean = chunkRandom(cx, cz, 403 + i * 3, -0.18, 0.18);
+    const yaw = chunkRandom(cx, cz, 404 + i * 3, 0, Math.PI * 2);
+    quaternion.setFromEuler(new THREE.Euler(lean, yaw, lean * 0.6));
+    scale.set(
+      chunkRandom(cx, cz, 405 + i * 3, 0.58, 1.2),
+      bladeHeight,
+      chunkRandom(cx, cz, 406 + i * 3, 0.58, 1.15),
+    );
+    matrix.compose(new THREE.Vector3(x, height + bladeHeight * 0.48, z), quaternion, scale);
+    grass.setMatrixAt(i, matrix);
+    color.setHex(i % 5 === 0 ? 0xa89a54 : i % 7 === 0 ? 0x3f5632 : 0x5f7042);
+    grass.setColorAt(i, color);
+  }
+
+  grass.castShadow = true;
+  grass.receiveShadow = true;
+  grass.frustumCulled = false;
+  return grass;
+}
+
+function makeAtmosphereParticles(count: number) {
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const color = new THREE.Color();
+
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = randomRange(-135, 135);
+    positions[i * 3 + 1] = randomRange(3.5, 34);
+    positions[i * 3 + 2] = randomRange(-135, 135);
+    color.setHex(i % 6 === 0 ? 0xd9d6c4 : 0xbcae8a);
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const material = new THREE.PointsMaterial({
+    size: 0.16,
+    transparent: true,
+    opacity: 0.32,
+    depthWrite: false,
+    vertexColors: true,
+  });
+  const particles = new THREE.Points(geometry, material);
+  particles.frustumCulled = false;
+  return particles;
+}
+
 function makeWorldChunk(cx: number, cz: number) {
   const group = new THREE.Group();
   group.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
@@ -1065,6 +1136,9 @@ function makeWorldChunk(cx: number, cz: number) {
   ground.position.y = 0.006;
   ground.receiveShadow = true;
   group.add(ground);
+
+  const grassCount = terrainRoll > 0.72 ? 46 : terrainRoll > 0.38 ? 92 : 66;
+  group.add(makeSteppeGrassPatch(cx, cz, grassCount));
 
   const riverBand = Math.abs(Math.sin(cx * 0.62 + cz * 0.38)) < 0.18;
   if (riverBand) {
@@ -1492,6 +1566,11 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     const rimLight = new THREE.DirectionalLight(0x8ccfff, 0.95);
     rimLight.position.set(38, 26, -42);
     scene.add(rimLight);
+    const fireGlow = new THREE.PointLight(0xff9b48, 1.6, 42, 1.8);
+    fireGlow.position.set(0, 5.2, START_Z - 18);
+    scene.add(fireGlow);
+    const atmosphereParticles = makeAtmosphereParticles(360);
+    scene.add(atmosphereParticles);
 
     const groundGeo = new THREE.PlaneGeometry(WORLD_HALF * 2 + 70, START_Z - FINISH_Z + 140, 72, 180);
     const groundPos = groundGeo.attributes.position;
@@ -1571,6 +1650,9 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       house.rotation.y = npc.x < 0 ? -0.28 : 0.28;
       scene.add(house);
       addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 5.2, kind: 'solid' });
+      const windowGlow = new THREE.PointLight(npc.mood === 'evil' ? 0xb84230 : 0xffc978, npc.mood === 'evil' ? 1.15 : 0.9, 18, 2.1);
+      windowGlow.position.set(npc.x, 2.55, npc.z - 4.6);
+      scene.add(windowGlow);
 
       const figure = makeNpcFigure(npc.mood);
       figure.position.set(npc.x, 0, npc.z - 4.8);
@@ -2584,6 +2666,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
 
       if (activeEvent === 'starvation') hpRef.current -= dt * 0.85 * balance.enemyDamage;
       music?.update(clamp(enemiesRef.current.length / maxEnemies, 0, 1), hpRef.current, !!activeEvent, inHloddev);
+      const shaderTime = performance.now() * 0.001;
       const dayAngle = dayTimeRef.current * Math.PI * 2 - Math.PI * 0.5;
       const sunLift = Math.max(0, Math.sin(dayAngle));
       const moonLift = Math.max(0, -Math.sin(dayAngle));
@@ -2592,6 +2675,8 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       hemi.intensity = inHloddev ? 0.72 : 0.22 + daylight * 0.72;
       sun.intensity = inHloddev ? 2.7 : 0.45 + daylight * 4.3;
       rimLight.intensity = inHloddev ? 1.05 : 0.42 + moonLift * 1.15;
+      fireGlow.intensity = (dayPhase === 'night' || dayPhase === 'dusk' ? 2.1 : 0.85) * (activeEvent === 'storm' ? 1.35 : 1);
+      fireGlow.position.set(playerRef.current.x + Math.sin(shaderTime * 0.8) * 18, playerRef.current.y + 4.8, playerRef.current.z - 18 + Math.cos(shaderTime * 0.6) * 12);
       const fogColor = activeVision === 'bloodmoon'
         ? 0x6f2428
         : activeVision === 'echo'
@@ -2605,7 +2690,6 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
         activeVision === 'whiteout' ? 8 : inHloddev ? 12 : activeEvent === 'storm' ? 20 : 42,
         activeVision === 'bloodmoon' ? 150 : activeVision === 'echo' ? 118 : activeVision === 'whiteout' ? 70 : inHloddev ? 92 : activeEvent === 'storm' ? 82 : 245,
       );
-      const shaderTime = performance.now() * 0.001;
       for (const material of shaderMaterials) {
         if (material.uniforms.uTime) material.uniforms.uTime.value = shaderTime;
         if (material.uniforms.uFogColor) material.uniforms.uFogColor.value.setHex(fogColor);
@@ -2615,6 +2699,14 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       }
 
       const cameraTarget = playerRef.current.clone();
+      atmosphereParticles.position.copy(cameraTarget);
+      atmosphereParticles.rotation.y += dt * (activeEvent === 'storm' ? 0.18 : 0.035);
+      atmosphereParticles.rotation.x = Math.sin(shaderTime * 0.12) * 0.04;
+      const atmosphereMat = atmosphereParticles.material;
+      if (atmosphereMat instanceof THREE.PointsMaterial) {
+        atmosphereMat.opacity = activeVision === 'whiteout' ? 0.62 : activeEvent === 'storm' ? 0.5 : dayPhase === 'night' ? 0.18 : 0.3;
+        atmosphereMat.size = activeEvent === 'storm' ? 0.24 : 0.16;
+      }
       skyDome.position.copy(cameraTarget);
       const sunArcY = Math.sin(dayAngle) * 78;
       const sunArcX = Math.cos(dayAngle) * 74;
