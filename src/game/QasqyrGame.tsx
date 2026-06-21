@@ -437,6 +437,77 @@ function cloneMaterial(material: THREE.Material | THREE.Material[]) {
   return Array.isArray(material) ? material.map((entry) => entry.clone()) : material.clone();
 }
 
+type WorldTextureSet = {
+  soil: THREE.CanvasTexture;
+  grass: THREE.CanvasTexture;
+  bark: THREE.CanvasTexture;
+  leaves: THREE.CanvasTexture;
+  rock: THREE.CanvasTexture;
+  snow: THREE.CanvasTexture;
+  roof: THREE.CanvasTexture;
+  wall: THREE.CanvasTexture;
+};
+
+let cachedWorldTextures: WorldTextureSet | null = null;
+
+function makeProceduralTexture(name: string, colors: string[], size = 128, streak = 0.35) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.CanvasTexture(canvas);
+
+  ctx.fillStyle = colors[0];
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < size * size * 0.42; i++) {
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const w = 1 + Math.random() * (streak > 0.5 ? 8 : 4);
+    const h = 1 + Math.random() * (streak > 0.5 ? 2 : 5);
+    ctx.globalAlpha = 0.16 + Math.random() * 0.28;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+  }
+  ctx.globalAlpha = 1;
+  for (let i = 0; i < 22; i++) {
+    ctx.strokeStyle = colors[(i + 1) % colors.length];
+    ctx.globalAlpha = 0.08 + Math.random() * 0.16;
+    ctx.lineWidth = 1 + Math.random() * 2;
+    ctx.beginPath();
+    ctx.moveTo(Math.random() * size, Math.random() * size);
+    ctx.lineTo(Math.random() * size, Math.random() * size);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.name = name;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(3, 3);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function worldTextures() {
+  if (!cachedWorldTextures) {
+    cachedWorldTextures = {
+      soil: makeProceduralTexture('steppe soil texture', ['#6f6a45', '#897b4d', '#4b4632', '#a09159'], 128, 0.28),
+      grass: makeProceduralTexture('steppe grass texture', ['#526a39', '#354b2e', '#8a8750', '#6f7d48'], 128, 0.75),
+      bark: makeProceduralTexture('tree bark texture', ['#3a261a', '#5a3d29', '#2b1c14', '#7a5636'], 128, 0.9),
+      leaves: makeProceduralTexture('tree leaves texture', ['#21472f', '#2f6b3f', '#193525', '#5f7042'], 128, 0.45),
+      rock: makeProceduralTexture('rock mountain texture', ['#5f625c', '#77746a', '#444743', '#8d897e'], 128, 0.22),
+      snow: makeProceduralTexture('snow cap texture', ['#d9e5e2', '#f4f1e8', '#b7c8c7', '#edf8f4'], 96, 0.2),
+      roof: makeProceduralTexture('dark roof texture', ['#2b1715', '#3f2b1f', '#17120f', '#60412c'], 128, 0.82),
+      wall: makeProceduralTexture('mud wall texture', ['#6f7f63', '#746957', '#4f3a35', '#8a7d5e'], 128, 0.36),
+    };
+  }
+  return cachedWorldTextures;
+}
+
 function makeOutfitInstance(template: THREE.Group, role: OutfitRole) {
   const outfit = cloneSkeleton(template) as THREE.Group;
   outfit.traverse((part) => {
@@ -736,7 +807,8 @@ function makeFortress(x: number, z: number, fake = false) {
 
 function makeRockCluster() {
   const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x77746a, roughness: 0.96 });
+  const textures = worldTextures();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x77746a, map: textures.rock, bumpMap: textures.rock, bumpScale: 0.09, roughness: 0.96 });
   const count = 3 + Math.floor(Math.random() * 4);
   for (let i = 0; i < count; i++) {
     const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(randomRange(0.35, 1.1), 0), mat);
@@ -752,7 +824,8 @@ function makeRockCluster() {
 
 function makeDryTree() {
   const group = new THREE.Group();
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a4634, roughness: 0.94 });
+  const textures = worldTextures();
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a4634, map: textures.bark, bumpMap: textures.bark, bumpScale: 0.08, roughness: 0.94 });
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.27, 3.2, 7), trunkMat);
   trunk.position.y = 1.6;
   trunk.rotation.z = randomRange(-0.18, 0.18);
@@ -772,9 +845,10 @@ function makeDryTree() {
 
 function makeForestTree() {
   const group = new THREE.Group();
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4d3425, roughness: 0.92 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2f6b3f, roughness: 0.88 });
-  const darkLeafMat = new THREE.MeshStandardMaterial({ color: 0x244f34, roughness: 0.9 });
+  const textures = worldTextures();
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4d3425, map: textures.bark, bumpMap: textures.bark, bumpScale: 0.08, roughness: 0.92 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2f6b3f, map: textures.leaves, bumpMap: textures.leaves, bumpScale: 0.035, roughness: 0.88 });
+  const darkLeafMat = new THREE.MeshStandardMaterial({ color: 0x244f34, map: textures.leaves, bumpMap: textures.leaves, bumpScale: 0.035, roughness: 0.9 });
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.32, 3.4, 8), trunkMat);
   trunk.position.y = 1.7;
   trunk.castShadow = true;
@@ -791,8 +865,9 @@ function makeForestTree() {
 
 function makeMountain() {
   const group = new THREE.Group();
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x6f746f, roughness: 0.98, flatShading: true });
-  const snowMat = new THREE.MeshStandardMaterial({ color: 0xd9e5e2, roughness: 0.82, flatShading: true });
+  const textures = worldTextures();
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x6f746f, map: textures.rock, bumpMap: textures.rock, bumpScale: 0.14, roughness: 0.98, flatShading: true });
+  const snowMat = new THREE.MeshStandardMaterial({ color: 0xd9e5e2, map: textures.snow, bumpMap: textures.snow, bumpScale: 0.025, roughness: 0.82, flatShading: true });
   const height = randomRange(9, 18);
   const base = randomRange(7, 14);
   const peak = new THREE.Mesh(new THREE.ConeGeometry(base, height, 6), rockMat);
@@ -831,7 +906,7 @@ function makeRiverSegment(size: number) {
   water.rotation.z = randomRange(-0.24, 0.24);
   group.add(water);
 
-  const shoreMat = new THREE.MeshStandardMaterial({ color: 0x827852, roughness: 0.98 });
+  const shoreMat = new THREE.MeshStandardMaterial({ color: 0x827852, map: worldTextures().soil, bumpMap: worldTextures().soil, bumpScale: 0.045, roughness: 0.98 });
   for (const side of [-1, 1]) {
     const shore = new THREE.Mesh(new THREE.PlaneGeometry(size * 1.12, 3.2), shoreMat);
     shore.rotation.x = -Math.PI / 2;
@@ -892,6 +967,9 @@ function makeGroundShaderMaterial(seed = 0) {
       void main() {
         float n = noise(vWorld.xz * 0.055);
         float fine = noise(vWorld.xz * 0.22 + uTime * 0.015);
+        float grit = noise(vWorld.xz * 1.35 + uSeed * 0.17);
+        float blades = noise(vec2(vWorld.x * 0.82, vWorld.z * 3.4));
+        float pebble = smoothstep(0.88, 0.985, noise(vWorld.xz * 2.15 + 19.0));
         vec3 grass = vec3(0.29, 0.42, 0.22);
         vec3 dry = vec3(0.56, 0.49, 0.30);
         vec3 damp = vec3(0.18, 0.28, 0.22);
@@ -899,6 +977,9 @@ function makeGroundShaderMaterial(seed = 0) {
         vec3 color = mix(dry, grass, smoothstep(0.22, 0.78, n));
         color = mix(color, damp, smoothstep(0.72, 0.95, fine) * 0.38);
         color = mix(color, rock, smoothstep(0.58, 1.05, abs(vHeight)));
+        color += (grit - 0.5) * 0.12;
+        color = mix(color, color + vec3(0.08, 0.11, 0.03), smoothstep(0.5, 0.86, blades) * 0.22);
+        color = mix(color, vec3(0.28, 0.27, 0.23), pebble * 0.42);
         float light = 0.78 + 0.22 * smoothstep(-0.35, 0.55, vHeight);
         color *= light;
         float dist = length(cameraPosition.xz - vWorld.xz);
@@ -936,11 +1017,15 @@ function makeWaterShaderMaterial() {
       varying vec3 vWorld;
       void main() {
         float ripple = sin(vUv.x * 42.0 + uTime * 3.4) * 0.5 + sin((vUv.x + vUv.y) * 24.0 - uTime * 2.2) * 0.5;
+        float fineRipple = sin(vWorld.x * 0.9 + uTime * 4.8) * sin(vWorld.z * 0.7 - uTime * 3.1);
         float shine = smoothstep(0.68, 0.98, ripple);
+        float foam = smoothstep(0.02, 0.09, min(vUv.y, 1.0 - vUv.y)) * (1.0 - smoothstep(0.09, 0.18, min(vUv.y, 1.0 - vUv.y)));
         vec3 deep = vec3(0.08, 0.32, 0.38);
         vec3 shallow = vec3(0.18, 0.56, 0.65);
         vec3 color = mix(deep, shallow, vUv.y);
         color += shine * vec3(0.45, 0.72, 0.78);
+        color += fineRipple * vec3(0.025, 0.055, 0.06);
+        color = mix(color, vec3(0.72, 0.92, 0.9), foam * 0.34);
         float dist = length(cameraPosition.xz - vWorld.xz);
         float fog = smoothstep(120.0, 360.0, dist);
         gl_FragColor = vec4(mix(color, uFogColor, fog * 0.52), 0.78);
@@ -992,7 +1077,7 @@ function makeSkyDome() {
 
 function makeRuin() {
   const group = new THREE.Group();
-  const stone = new THREE.MeshStandardMaterial({ color: 0x817a6d, roughness: 0.98 });
+  const stone = new THREE.MeshStandardMaterial({ color: 0x817a6d, map: worldTextures().rock, bumpMap: worldTextures().rock, bumpScale: 0.08, roughness: 0.98 });
   for (let i = 0; i < 6; i++) {
     const block = new THREE.Mesh(new THREE.BoxGeometry(randomRange(1.0, 2.2), randomRange(0.5, 1.6), randomRange(0.55, 1.1)), stone);
     block.position.set(randomRange(-3.2, 3.2), block.geometry.parameters.height / 2, randomRange(-1.8, 1.8));
@@ -1007,7 +1092,7 @@ function makeRuin() {
 function makeCampDebris() {
   const group = new THREE.Group();
   const ash = new THREE.MeshStandardMaterial({ color: 0x2a2926, roughness: 0.9 });
-  const wood = new THREE.MeshStandardMaterial({ color: 0x593821, roughness: 0.88 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x593821, map: worldTextures().bark, bumpMap: worldTextures().bark, bumpScale: 0.07, roughness: 0.88 });
   const ring = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.08, 8, 22), ash);
   ring.rotation.x = Math.PI / 2;
   ring.position.y = 0.06;
@@ -1026,9 +1111,10 @@ function makeCampDebris() {
 function makeHouse(mood: NpcMood) {
   const group = new THREE.Group();
   const wallColor = mood === 'good' ? 0x6f7f63 : mood === 'evil' ? 0x4f3a35 : 0x746957;
+  const textures = worldTextures();
   const wall = new THREE.Mesh(
     new THREE.BoxGeometry(8, 4.2, 7),
-    new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.9 }),
+    new THREE.MeshStandardMaterial({ color: wallColor, map: textures.wall, bumpMap: textures.wall, bumpScale: 0.055, roughness: 0.9 }),
   );
   wall.position.y = 2.1;
   wall.castShadow = true;
@@ -1036,7 +1122,7 @@ function makeHouse(mood: NpcMood) {
 
   const roof = new THREE.Mesh(
     new THREE.ConeGeometry(6.2, 3, 4),
-    new THREE.MeshStandardMaterial({ color: mood === 'evil' ? 0x2b1715 : 0x3f2b1f, roughness: 0.85 }),
+    new THREE.MeshStandardMaterial({ color: mood === 'evil' ? 0x2b1715 : 0x3f2b1f, map: textures.roof, bumpMap: textures.roof, bumpScale: 0.065, roughness: 0.85 }),
   );
   roof.position.y = 5.3;
   roof.rotation.y = Math.PI / 4;
@@ -1044,7 +1130,7 @@ function makeHouse(mood: NpcMood) {
 
   const door = new THREE.Mesh(
     new THREE.BoxGeometry(1.6, 2.4, 0.18),
-    new THREE.MeshStandardMaterial({ color: 0x24160f, roughness: 0.8 }),
+    new THREE.MeshStandardMaterial({ color: 0x24160f, map: textures.bark, bumpMap: textures.bark, bumpScale: 0.05, roughness: 0.8 }),
   );
   door.position.set(0, 1.2, -3.6);
 
@@ -1129,6 +1215,9 @@ function makeSteppeGrassPatch(cx: number, cz: number, count: number) {
   const geometry = new THREE.ConeGeometry(0.13, 1, 4);
   const material = new THREE.MeshStandardMaterial({
     color: 0x5d6b3f,
+    map: worldTextures().grass,
+    bumpMap: worldTextures().grass,
+    bumpScale: 0.025,
     roughness: 0.98,
     metalness: 0,
     vertexColors: true,
@@ -1710,13 +1799,13 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
 
     const path = new THREE.Mesh(
       new THREE.PlaneGeometry(22, START_Z - FINISH_Z + 80),
-      new THREE.MeshStandardMaterial({ color: 0x6d7440, roughness: 0.96 }),
+      new THREE.MeshStandardMaterial({ color: 0x6d7440, map: worldTextures().soil, bumpMap: worldTextures().soil, bumpScale: 0.035, roughness: 0.96 }),
     );
     path.rotation.x = -Math.PI / 2;
     path.position.set(0, 0.02, (START_Z + FINISH_Z) / 2 - 10);
     scene.add(path);
 
-    const dustMat = new THREE.MeshStandardMaterial({ color: 0x8a7a4c, roughness: 0.98 });
+    const dustMat = new THREE.MeshStandardMaterial({ color: 0x8a7a4c, map: worldTextures().soil, bumpMap: worldTextures().soil, bumpScale: 0.026, roughness: 0.98 });
     for (let i = 0; i < 18; i++) {
       const patch = new THREE.Mesh(new THREE.CircleGeometry(randomRange(4, 11), 18), dustMat);
       patch.rotation.x = -Math.PI / 2;
@@ -1727,8 +1816,8 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       scene.add(patch);
     }
 
-    const grassMat = new THREE.MeshStandardMaterial({ color: 0x4d5e36, roughness: 0.95 });
-    const strawMat = new THREE.MeshStandardMaterial({ color: 0xb0a35a, roughness: 0.98 });
+    const grassMat = new THREE.MeshStandardMaterial({ color: 0x4d5e36, map: worldTextures().grass, bumpMap: worldTextures().grass, bumpScale: 0.035, roughness: 0.95 });
+    const strawMat = new THREE.MeshStandardMaterial({ color: 0xb0a35a, map: worldTextures().grass, bumpMap: worldTextures().grass, bumpScale: 0.025, roughness: 0.98 });
     for (let i = 0; i < 280; i++) {
       const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.18 + (i % 3) * 0.08, 0.9 + (i % 5) * 0.24, 5), i % 4 === 0 ? strawMat : grassMat);
       tuft.position.set(randomRange(-WORLD_HALF, WORLD_HALF), 0.6, randomRange(FINISH_Z + 20, START_Z + 4));
