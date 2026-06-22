@@ -14,6 +14,7 @@ type DialogEffect = 'story' | 'heal' | 'medkit' | 'weapon' | 'damage' | 'steal' 
 type Difficulty = 'story' | 'survival' | 'nightmare';
 type MenuTab = 'modes' | 'skins' | 'shop';
 type SkinRarity = 'Common' | 'Rare' | 'Epic' | 'Legendary';
+type KnifeShape = 'butterfly' | 'stiletto' | 'karambit' | 'bowie' | 'gut' | 'bayonet';
 type VisionKind = '' | 'bloodmoon' | 'echo' | 'whiteout';
 type DayPhase = 'dawn' | 'day' | 'dusk' | 'night';
 type WalkMode = 'walk' | 'sneak' | 'sprint' | 'tired';
@@ -112,6 +113,7 @@ class KnifeSkin {
     public readonly id: string,
     public readonly name: string,
     public readonly rarity: SkinRarity,
+    public readonly shape: KnifeShape,
     public readonly unlocked: boolean,
   ) {}
 }
@@ -194,12 +196,12 @@ const MODE_DESCRIPTIONS: Record<Difficulty, string> = {
 };
 
 const KNIFE_SKINS: KnifeSkin[] = [
-  new KnifeSkin('rust_nomad', 'Rust Nomad', 'Common', true),
-  new KnifeSkin('wolf_fang', 'Wolf Fang', 'Common', true),
-  new KnifeSkin('blue_steppe', 'Blue Steppe', 'Rare', false),
-  new KnifeSkin('kumys_gold', 'Kumys Gold', 'Rare', false),
-  new KnifeSkin('hlooddev_edge', 'Hloddev Edge', 'Epic', false),
-  new KnifeSkin('qasqyr_relic', 'Qasqyr Relic', 'Legendary', false),
+  new KnifeSkin('butterfly_fade', 'Butterfly Fade', 'Rare', 'butterfly', true),
+  new KnifeSkin('stiletto_crimson', 'Stiletto Crimson', 'Epic', 'stiletto', true),
+  new KnifeSkin('karambit_steppe', 'Karambit Steppe', 'Legendary', 'karambit', true),
+  new KnifeSkin('bowie_oxide', 'Bowie Oxide', 'Common', 'bowie', true),
+  new KnifeSkin('gut_kumys', 'Gut Kumys', 'Rare', 'gut', true),
+  new KnifeSkin('bayonet_hloddev', 'Bayonet Hloddev', 'Epic', 'bayonet', true),
 ];
 
 const CASE_PRICES = {
@@ -766,6 +768,109 @@ function makePickup(kind: PickupKind) {
   return group;
 }
 
+function makeKnifeSkinModel(skinId: string) {
+  const skin = KNIFE_SKINS.find((item) => item.id === skinId) ?? KNIFE_SKINS[0];
+  const group = new THREE.Group();
+  const rarityColor = new THREE.Color(SKIN_RARITY_COLORS[skin.rarity]);
+  const bladeMat = new THREE.MeshStandardMaterial({
+    color: skin.shape === 'karambit' ? 0xb8d7d0 : skin.shape === 'stiletto' ? 0xe7e4df : 0xd8dde4,
+    emissive: rarityColor,
+    emissiveIntensity: skin.rarity === 'Legendary' ? 0.16 : skin.rarity === 'Epic' ? 0.09 : 0.03,
+    metalness: 0.62,
+    roughness: 0.2,
+  });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x171717, metalness: 0.35, roughness: 0.42 });
+  const gripMat = new THREE.MeshStandardMaterial({
+    color: skin.shape === 'bowie' ? 0x5a3927 : skin.shape === 'karambit' ? 0x182820 : 0x26222a,
+    metalness: 0.12,
+    roughness: 0.72,
+  });
+  const accentMat = new THREE.MeshStandardMaterial({ color: rarityColor, metalness: 0.45, roughness: 0.28 });
+
+  const addGrip = (length = 0.58, radius = 0.065) => {
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.15, length, 12), gripMat);
+    grip.rotation.x = Math.PI / 2;
+    grip.position.z = 0.42;
+    group.add(grip);
+    return grip;
+  };
+
+  if (skin.shape === 'butterfly') {
+    const leftHandle = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.72), gripMat);
+    const rightHandle = leftHandle.clone();
+    leftHandle.position.set(-0.085, 0, 0.32);
+    rightHandle.position.set(0.085, 0, 0.32);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.045, 0.96), bladeMat);
+    blade.position.z = -0.42;
+    const latch = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.015, 8, 18), accentMat);
+    latch.rotation.x = Math.PI / 2;
+    latch.position.z = 0.72;
+    group.add(leftHandle, rightHandle, blade, latch);
+  } else if (skin.shape === 'stiletto') {
+    addGrip(0.62, 0.055);
+    const blade = new THREE.Mesh(new THREE.ConeGeometry(0.11, 1.18, 4), bladeMat);
+    blade.rotation.x = Math.PI / 2;
+    blade.position.z = -0.42;
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 0.08), accentMat);
+    guard.position.z = 0.06;
+    group.add(blade, guard);
+  } else if (skin.shape === 'karambit') {
+    addGrip(0.52, 0.06);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.027, 10, 24), darkMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.z = 0.74;
+    const blade = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.045, 8, 36, Math.PI * 1.18), bladeMat);
+    blade.rotation.set(Math.PI / 2, 0, -0.95);
+    blade.position.set(0.22, 0, -0.22);
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.24, 8), bladeMat);
+    tip.rotation.set(0, 0, -0.8);
+    tip.position.set(0.47, 0, -0.52);
+    group.add(ring, blade, tip);
+  } else if (skin.shape === 'bowie') {
+    addGrip(0.62, 0.075);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.055, 1.1), bladeMat);
+    blade.position.z = -0.42;
+    blade.scale.x = 1.25;
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.32, 4), bladeMat);
+    tip.rotation.x = Math.PI / 2;
+    tip.position.z = -1.14;
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.06, 0.08), darkMat);
+    guard.position.z = 0.08;
+    group.add(blade, tip, guard);
+  } else if (skin.shape === 'gut') {
+    addGrip(0.58, 0.07);
+    const blade = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.82, 5, 12), bladeMat);
+    blade.rotation.x = Math.PI / 2;
+    blade.position.z = -0.48;
+    blade.scale.x = 0.74;
+    const hook = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.025, 8, 20, Math.PI * 0.85), bladeMat);
+    hook.rotation.set(Math.PI / 2, 0, 0.45);
+    hook.position.set(0.14, 0, -0.9);
+    group.add(blade, hook);
+  } else {
+    addGrip(0.72, 0.058);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.045, 1.36), bladeMat);
+    blade.position.z = -0.62;
+    const fuller = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.052, 0.82), darkMat);
+    fuller.position.z = -0.55;
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.08), accentMat);
+    guard.position.z = 0.08;
+    group.add(blade, fuller, guard);
+  }
+
+  group.traverse((part) => {
+    if (part instanceof THREE.Mesh) {
+      part.castShadow = true;
+      part.receiveShadow = true;
+    }
+  });
+  return group;
+}
+
+function makeHeldItemModel(kind: PickupKind, knifeSkinId: string) {
+  return kind === 'knife' ? makeKnifeSkinModel(knifeSkinId) : makePickup(kind);
+}
+
 function makeFortress(x: number, z: number, fake = false) {
   const fortress = new THREE.Group();
   const stone = new THREE.MeshStandardMaterial({ color: fake ? 0x8a735f : 0x7f8178, roughness: 0.9 });
@@ -1108,6 +1213,61 @@ function makeCampDebris() {
   return group;
 }
 
+function makeDetailPatch(kindSeed = 0) {
+  const group = new THREE.Group();
+  const textures = worldTextures();
+  const twigMat = new THREE.MeshStandardMaterial({ color: 0x4b301f, map: textures.bark, bumpMap: textures.bark, bumpScale: 0.05, roughness: 0.92 });
+  const flowerMat = new THREE.MeshStandardMaterial({ color: kindSeed % 3 === 0 ? 0xd6c35f : kindSeed % 3 === 1 ? 0xc78464 : 0x8fb36b, roughness: 0.86 });
+  const bushMat = new THREE.MeshStandardMaterial({ color: kindSeed % 2 === 0 ? 0x314f32 : 0x55663a, map: textures.leaves, bumpMap: textures.leaves, bumpScale: 0.025, roughness: 0.94 });
+  const pebbleMat = new THREE.MeshStandardMaterial({ color: 0x6b675e, map: textures.rock, bumpMap: textures.rock, bumpScale: 0.06, roughness: 0.98 });
+
+  for (let i = 0; i < 5; i++) {
+    const pebble = new THREE.Mesh(new THREE.DodecahedronGeometry(randomRange(0.08, 0.24), 0), pebbleMat);
+    pebble.position.set(randomRange(-1.6, 1.6), randomRange(0.04, 0.1), randomRange(-1.3, 1.3));
+    pebble.scale.set(randomRange(1, 1.8), randomRange(0.35, 0.7), randomRange(0.8, 1.5));
+    pebble.rotation.set(randomRange(0, 1), randomRange(0, Math.PI), randomRange(0, 1));
+    pebble.castShadow = true;
+    group.add(pebble);
+  }
+
+  for (let i = 0; i < 3; i++) {
+    const twig = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.045, randomRange(0.7, 1.45), 6), twigMat);
+    twig.position.set(randomRange(-1.2, 1.2), 0.08, randomRange(-1.2, 1.2));
+    twig.rotation.set(Math.PI / 2 + randomRange(-0.2, 0.2), randomRange(0, Math.PI), randomRange(0, Math.PI));
+    twig.castShadow = true;
+    group.add(twig);
+  }
+
+  const bush = new THREE.Mesh(new THREE.DodecahedronGeometry(randomRange(0.35, 0.72), 1), bushMat);
+  bush.position.set(randomRange(-0.8, 0.8), 0.35, randomRange(-0.8, 0.8));
+  bush.scale.set(1.45, 0.68, 1.1);
+  bush.castShadow = true;
+  group.add(bush);
+
+  for (let i = 0; i < 4; i++) {
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.018, randomRange(0.3, 0.62), 5), bushMat);
+    const bloom = new THREE.Mesh(new THREE.SphereGeometry(0.055, 7, 5), flowerMat);
+    stem.position.set(randomRange(-1.1, 1.1), 0.22, randomRange(-1.1, 1.1));
+    bloom.position.set(stem.position.x, stem.position.y + 0.28, stem.position.z);
+    group.add(stem, bloom);
+  }
+
+  return group;
+}
+
+function makeTreeStump() {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x4d3425, map: worldTextures().bark, bumpMap: worldTextures().bark, bumpScale: 0.08, roughness: 0.94 });
+  const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.46, 0.72, 9), mat);
+  stump.position.y = 0.36;
+  stump.castShadow = true;
+  stump.receiveShadow = true;
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.39, 0.39, 0.035, 18), new THREE.MeshStandardMaterial({ color: 0x8b6846, roughness: 0.9 }));
+  top.position.y = 0.74;
+  group.add(stump, top);
+  return group;
+}
+
 function makeHouse(mood: NpcMood) {
   const group = new THREE.Group();
   const wallColor = mood === 'good' ? 0x6f7f63 : mood === 'evil' ? 0x4f3a35 : 0x746957;
@@ -1347,6 +1507,28 @@ function makeWorldChunk(cx: number, cz: number) {
     }
   }
 
+  const detailCount = 5 + Math.floor(hash2(cx, cz, 540) * 9);
+  for (let i = 0; i < detailCount; i++) {
+    const detail = makeDetailPatch(i + cx * 17 + cz * 31);
+    detail.position.set(chunkRandom(cx, cz, i + 560, -42, 42), 0, chunkRandom(cx, cz, i + 590, -42, 42));
+    detail.rotation.y = chunkRandom(cx, cz, i + 620, 0, Math.PI * 2);
+    detail.scale.setScalar(chunkRandom(cx, cz, i + 650, 0.55, 1.35));
+    group.add(detail);
+  }
+
+  if (terrainRoll > 0.34 && terrainRoll < 0.72) {
+    const stumpCount = 1 + Math.floor(hash2(cx, cz, 700) * 3);
+    for (let i = 0; i < stumpCount; i++) {
+      const stump = makeTreeStump();
+      stump.position.set(chunkRandom(cx, cz, i + 720, -38, 38), 0, chunkRandom(cx, cz, i + 750, -38, 38));
+      stump.rotation.y = chunkRandom(cx, cz, i + 780, 0, Math.PI * 2);
+      const scale = chunkRandom(cx, cz, i + 810, 0.65, 1.2);
+      stump.scale.setScalar(scale);
+      obstacles.push({ x: stump.position.x, z: stump.position.z, radius: 0.46 * scale, kind: 'solid' });
+      group.add(stump);
+    }
+  }
+
   group.userData.obstacles = obstacles;
   return group;
 }
@@ -1476,15 +1658,6 @@ function createDynamicMusic() {
   } catch {
     return null;
   }
-}
-
-function heldItemColor(kind: PickupKind) {
-  if (isWeapon(kind)) return WEAPONS[kind].color;
-  if (kind === 'medkit') return 0xf4f1e8;
-  if (kind === 'crystal') return 0x79e6ff;
-  if (kind === 'revive') return 0x8cffb8;
-  if (kind === 'key') return 0xffc857;
-  return 0xd2b48c;
 }
 
 function heldItemScale(kind: PickupKind) {
@@ -1838,6 +2011,12 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     for (let i = 0; i < 7; i++) {
       placeScenery(scene, makeCampDebris(), randomRange(-WORLD_HALF + 24, WORLD_HALF - 24), randomRange(FINISH_Z + 55, START_Z - 50), randomRange(0.8, 1.3));
     }
+    for (let i = 0; i < 44; i++) {
+      placeScenery(scene, makeDetailPatch(i), randomRange(-WORLD_HALF + 10, WORLD_HALF - 10), randomRange(FINISH_Z + 28, START_Z - 12), randomRange(0.65, 1.45));
+    }
+    for (let i = 0; i < 12; i++) {
+      placeScenery(scene, makeTreeStump(), randomRange(-WORLD_HALF + 18, WORLD_HALF - 18), randomRange(FINISH_Z + 48, START_Z - 34), randomRange(0.65, 1.3));
+    }
 
     const physicsObstacles: PhysicsObstacle[] = [];
     const npcFigures: { npc: HouseNpc; mesh: THREE.Group; animator?: CharacterAnimator }[] = [];
@@ -2016,12 +2195,23 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     const hloodAura = new THREE.Mesh(new THREE.SphereGeometry(1.75, 24, 16), hloodMat);
     hloodAura.position.y = 1.55;
     hloodAura.visible = false;
-    const blade = new THREE.Mesh(
-      new THREE.BoxGeometry(0.16, 0.15, 2.15),
-      new THREE.MeshStandardMaterial({ color: WEAPONS.knife.color, metalness: 0.35, roughness: 0.22 }),
-    );
-    blade.position.set(0.82, 1.45, -0.8);
-    player.add(playerBody, shirtFront, playerHead, hair, nose, leftEye, rightEye, mouth, hat, belt, pack, scarf, hloodAura, blade);
+    const heldWeaponModel = new THREE.Group();
+    heldWeaponModel.position.set(0.82, 1.03, -0.62);
+    heldWeaponModel.rotation.set(-0.2, 0.12, -0.12);
+    let renderedHeldKind: PickupKind | null = null;
+    let renderedKnifeSkinId = '';
+    const refreshHeldWeaponModel = () => {
+      if (renderedHeldKind === heldItemRef.current && renderedKnifeSkinId === selectedKnifeSkinId) return;
+      heldWeaponModel.clear();
+      const model = makeHeldItemModel(heldItemRef.current, selectedKnifeSkinId);
+      model.position.set(0, 0, 0);
+      model.rotation.set(0, 0, 0);
+      heldWeaponModel.add(model);
+      renderedHeldKind = heldItemRef.current;
+      renderedKnifeSkinId = selectedKnifeSkinId;
+    };
+    refreshHeldWeaponModel();
+    player.add(playerBody, shirtFront, playerHead, hair, nose, leftEye, rightEye, mouth, hat, belt, pack, scarf, hloodAura, heldWeaponModel);
     scene.add(player);
     const gltfLoader = new GLTFLoader();
     const assetMixers: THREE.AnimationMixer[] = [];
@@ -2053,7 +2243,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       attachPlayerAnimator();
 
       for (const part of player.children) {
-        if (part !== outfitModel && part !== hloodAura && part !== blade) part.visible = false;
+        if (part !== outfitModel && part !== hloodAura && part !== heldWeaponModel) part.visible = false;
       }
     };
     const removeMixer = (mixer: THREE.AnimationMixer | undefined) => {
@@ -2814,12 +3004,14 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       hloodAura.visible = inHloddev;
       hloodAura.rotation.y += dt * 1.8;
       hloodAura.scale.setScalar(1 + Math.sin(performance.now() * 0.008) * 0.04);
+      refreshHeldWeaponModel();
       const heldScale = heldItemScale(heldItemRef.current);
-      blade.scale.set(heldScale.x, heldScale.y, heldScale.z);
-      const bladeMat = blade.material;
-      if (bladeMat instanceof THREE.MeshStandardMaterial) bladeMat.color.setHex(heldItemColor(heldItemRef.current));
       const heldWeapon = isWeapon(heldItemRef.current) ? WEAPONS[heldItemRef.current] : null;
-      blade.rotation.x = heldWeapon && attackCdRef.current > heldWeapon.cooldown * 0.55 ? -0.9 : -0.25;
+      heldWeaponModel.scale.set(heldScale.x * 0.86, heldScale.y * 0.86, heldScale.z * 0.86);
+      heldWeaponModel.visible = true;
+      const attackSwing = heldWeapon && attackCdRef.current > heldWeapon.cooldown * 0.55;
+      heldWeaponModel.position.set(0.82, 1.03, -0.62);
+      heldWeaponModel.rotation.set(attackSwing ? -1.08 : -0.24, attackSwing ? 0.34 : 0.12, attackSwing ? -0.42 : -0.12);
 
       ensureCompanionModel();
       companionAttackCdRef.current = Math.max(0, companionAttackCdRef.current - dt);
@@ -3484,6 +3676,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
                     >
                       <span style={styles.skinBlade} />
                       <b>{skin.name}</b>
+                      <span>{skin.shape}</span>
                       <small style={{ color: SKIN_RARITY_COLORS[skin.rarity] }}>{skin.rarity}</small>
                       <span>{skin.unlocked ? (selectedKnifeSkinId === skin.id ? 'Выбран' : 'Разблокирован') : 'Заблокирован'}</span>
                     </button>
