@@ -53,8 +53,9 @@ export default function App() {
         </div>
       </header>
 
-      {playing && <QasqyrGame onExit={() => setPlaying(false)} />}
-      {!session ? (
+      {playing ? (
+        <QasqyrGame userId={session?.user.id} onExit={() => setPlaying(false)} />
+      ) : !session ? (
         <Auth
           onPlayAsGuest={() => setPlaying(true)}
           onAuthStarted={() => window.localStorage.setItem('qasqyr-open-mode-select', '1')}

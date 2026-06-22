@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 type WeaponKind = 'knife' | 'club' | 'sabre' | 'rifle';
 type PickupKind = 'medkit' | 'crystal' | 'key' | 'code' | 'revive' | WeaponKind;
 type EventKind = 'ambush' | 'storm' | 'rage' | 'starvation';
-type GamePhase = 'intro' | 'playing' | 'won' | 'lost';
+type GamePhase = 'intro' | 'tutorial' | 'playing' | 'won' | 'lost';
 type Dimension = 'steppe' | 'hloddev';
 type NpcMood = 'neutral' | 'evil' | 'good';
 type DialogEffect = 'story' | 'heal' | 'medkit' | 'weapon' | 'damage' | 'steal' | 'ambush' | 'trade';
@@ -109,6 +109,36 @@ type StoryFlags = {
   cruelty: number;
 };
 
+type SavedGameState = {
+  player: { x: number; z: number };
+  hp: number;
+  score: number;
+  dayTime: number;
+  stamina: number;
+  inventory: InventoryEntry[];
+  selectedSlot: number;
+  heldItem: PickupKind;
+  weapon: WeaponKind;
+  storyFlags: StoryFlags;
+  key: QuestItem;
+  code: QuestItem;
+  revive: QuestItem;
+  traderCoordsBought: boolean;
+  companionRecruited: boolean;
+  companionAlive: boolean;
+  companionHp: number;
+  houseVisitedIds: number[];
+};
+
+type GameProgressRow = {
+  gold: number;
+  diamonds: number;
+  unlocked_skins: string[];
+  selected_knife_skin_id: string;
+  difficulty: Difficulty;
+  game_state: SavedGameState | Record<string, never>;
+};
+
 class KnifeSkin {
   constructor(
     public readonly id: string,
@@ -139,6 +169,13 @@ const DAY_LENGTH = 210;
 const STAMINA_MAX = 100;
 const TRADER_NPC_ID = 8;
 const TRADER_PRICE_MEDKITS = 5;
+const FREE_KNIFE_SKIN_ID = 'bowie_oxide';
+const STARTING_UNLOCKED_SKINS = [FREE_KNIFE_SKIN_ID];
+const STARTING_WALLET = { gold: 0, premium: 0 };
+const DIALOG_REWARD = {
+  success: { gold: 50, premium: 5 },
+  fail: { gold: 10, premium: 1 },
+};
 const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`;
 const COMPANION_HOUSE: HouseNpc = {
   id: 99,
@@ -198,12 +235,12 @@ const MODE_DESCRIPTIONS: Record<Difficulty, string> = {
 };
 
 const KNIFE_SKINS: KnifeSkin[] = [
-  new KnifeSkin('butterfly_fade', 'Butterfly Fade', 'Rare', 'butterfly', true),
-  new KnifeSkin('stiletto_crimson', 'Stiletto Crimson', 'Epic', 'stiletto', true),
-  new KnifeSkin('karambit_steppe', 'Karambit Steppe', 'Legendary', 'karambit', true),
+  new KnifeSkin('butterfly_fade', 'Butterfly Fade', 'Rare', 'butterfly', false),
+  new KnifeSkin('stiletto_crimson', 'Stiletto Crimson', 'Epic', 'stiletto', false),
+  new KnifeSkin('karambit_steppe', 'Karambit Steppe', 'Legendary', 'karambit', false),
   new KnifeSkin('bowie_oxide', 'Bowie Oxide', 'Common', 'bowie', true),
-  new KnifeSkin('gut_kumys', 'Gut Kumys', 'Rare', 'gut', true),
-  new KnifeSkin('bayonet_hloddev', 'Bayonet Hloddev', 'Epic', 'bayonet', true),
+  new KnifeSkin('gut_kumys', 'Gut Kumys', 'Rare', 'gut', false),
+  new KnifeSkin('bayonet_hloddev', 'Bayonet Hloddev', 'Epic', 'bayonet', false),
 ];
 
 const CASE_BONUS_REWARDS: { name: string; rarity: SkinRarity }[] = [
@@ -232,6 +269,51 @@ const SKIN_RARITY_COLORS: Record<SkinRarity, string> = {
   Rare: '#70d6ff',
   Epic: '#d78bff',
   Legendary: '#ffd37b',
+};
+
+const KNIFE_SKIN_VISUALS: Record<string, { blade: number; grip: number; accent: number; ui: string; clip: string }> = {
+  butterfly_fade: {
+    blade: 0xf0d38a,
+    grip: 0x182638,
+    accent: 0xff7f50,
+    ui: 'linear-gradient(90deg, #16283a 0 20%, #ffd37b 20% 46%, #ff7f50 46% 74%, #70d6ff 74%)',
+    clip: 'polygon(0 26%, 72% 18%, 100% 50%, 72% 82%, 0 74%)',
+  },
+  stiletto_crimson: {
+    blade: 0xf3f0eb,
+    grip: 0x361518,
+    accent: 0xb9242d,
+    ui: 'linear-gradient(90deg, #351416 0 24%, #e7e4df 24% 86%, #b9242d 86%)',
+    clip: 'polygon(0 35%, 82% 35%, 100% 50%, 82% 65%, 0 65%)',
+  },
+  karambit_steppe: {
+    blade: 0xb8d7d0,
+    grip: 0x1d3b29,
+    accent: 0xffd37b,
+    ui: 'radial-gradient(circle at 82% 50%, transparent 0 22%, #b8d7d0 24% 48%, transparent 50%), linear-gradient(90deg, #1d3b29 0 46%, #ffd37b 46% 60%, #b8d7d0 60%)',
+    clip: 'polygon(0 35%, 38% 35%, 52% 10%, 100% 20%, 74% 58%, 38% 65%, 0 65%)',
+  },
+  bowie_oxide: {
+    blade: 0xa2adad,
+    grip: 0x5a3927,
+    accent: 0x8d4f37,
+    ui: 'linear-gradient(90deg, #5a3927 0 28%, #8d4f37 28% 36%, #a2adad 36% 78%, #d8dde4 78%)',
+    clip: 'polygon(0 24%, 58% 24%, 100% 42%, 88% 76%, 0 76%)',
+  },
+  gut_kumys: {
+    blade: 0xefe1be,
+    grip: 0x2d2922,
+    accent: 0xa89a54,
+    ui: 'linear-gradient(90deg, #2d2922 0 30%, #a89a54 30% 42%, #efe1be 42% 82%, #4f5f42 82%)',
+    clip: 'polygon(0 28%, 62% 28%, 100% 12%, 84% 50%, 100% 88%, 62% 72%, 0 72%)',
+  },
+  bayonet_hloddev: {
+    blade: 0xcde9ef,
+    grip: 0x15191f,
+    accent: 0x70d6ff,
+    ui: 'linear-gradient(90deg, #15191f 0 24%, #70d6ff 24% 32%, #cde9ef 32% 92%, #ffffff 92%)',
+    clip: 'polygon(0 34%, 88% 34%, 100% 50%, 88% 66%, 0 66%)',
+  },
 };
 
 const WEAPONS: Record<WeaponKind, { name: string; damage: number; range: number; cooldown: number; color: number }> = {
@@ -790,8 +872,9 @@ function makeKnifeSkinModel(skinId: string) {
   const skin = KNIFE_SKINS.find((item) => item.id === skinId) ?? KNIFE_SKINS[0];
   const group = new THREE.Group();
   const rarityColor = new THREE.Color(SKIN_RARITY_COLORS[skin.rarity]);
+  const visual = KNIFE_SKIN_VISUALS[skin.id] ?? KNIFE_SKIN_VISUALS.butterfly_fade;
   const bladeMat = new THREE.MeshStandardMaterial({
-    color: skin.shape === 'karambit' ? 0xb8d7d0 : skin.shape === 'stiletto' ? 0xe7e4df : 0xd8dde4,
+    color: visual.blade,
     emissive: rarityColor,
     emissiveIntensity: skin.rarity === 'Legendary' ? 0.16 : skin.rarity === 'Epic' ? 0.09 : 0.03,
     metalness: 0.62,
@@ -799,11 +882,11 @@ function makeKnifeSkinModel(skinId: string) {
   });
   const darkMat = new THREE.MeshStandardMaterial({ color: 0x171717, metalness: 0.35, roughness: 0.42 });
   const gripMat = new THREE.MeshStandardMaterial({
-    color: skin.shape === 'bowie' ? 0x5a3927 : skin.shape === 'karambit' ? 0x182820 : 0x26222a,
+    color: visual.grip,
     metalness: 0.12,
     roughness: 0.72,
   });
-  const accentMat = new THREE.MeshStandardMaterial({ color: rarityColor, metalness: 0.45, roughness: 0.28 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: visual.accent, emissive: rarityColor, emissiveIntensity: 0.05, metalness: 0.45, roughness: 0.28 });
 
   const addGrip = (length = 0.58, radius = 0.065) => {
     const grip = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.15, length, 12), gripMat);
@@ -820,18 +903,24 @@ function makeKnifeSkinModel(skinId: string) {
     rightHandle.position.set(0.085, 0, 0.32);
     const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.045, 0.96), bladeMat);
     blade.position.z = -0.42;
+    const stripeA = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.052, 0.56), accentMat);
+    const stripeB = stripeA.clone();
+    stripeA.position.set(-0.086, 0, 0.32);
+    stripeB.position.set(0.086, 0, 0.32);
     const latch = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.015, 8, 18), accentMat);
     latch.rotation.x = Math.PI / 2;
     latch.position.z = 0.72;
-    group.add(leftHandle, rightHandle, blade, latch);
+    group.add(leftHandle, rightHandle, blade, stripeA, stripeB, latch);
   } else if (skin.shape === 'stiletto') {
     addGrip(0.62, 0.055);
     const blade = new THREE.Mesh(new THREE.ConeGeometry(0.11, 1.18, 4), bladeMat);
     blade.rotation.x = Math.PI / 2;
     blade.position.z = -0.42;
+    const bloodline = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.054, 0.66), accentMat);
+    bloodline.position.z = -0.44;
     const guard = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 0.08), accentMat);
     guard.position.z = 0.06;
-    group.add(blade, guard);
+    group.add(blade, bloodline, guard);
   } else if (skin.shape === 'karambit') {
     addGrip(0.52, 0.06);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.027, 10, 24), darkMat);
@@ -843,18 +932,22 @@ function makeKnifeSkinModel(skinId: string) {
     const tip = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.24, 8), bladeMat);
     tip.rotation.set(0, 0, -0.8);
     tip.position.set(0.47, 0, -0.52);
-    group.add(ring, blade, tip);
+    const charm = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), accentMat);
+    charm.position.set(-0.1, 0, 0.58);
+    group.add(ring, blade, tip, charm);
   } else if (skin.shape === 'bowie') {
     addGrip(0.62, 0.075);
     const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.055, 1.1), bladeMat);
     blade.position.z = -0.42;
     blade.scale.x = 1.25;
+    const oxidePatch = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.058, 0.28), accentMat);
+    oxidePatch.position.set(0.055, 0, -0.5);
     const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.32, 4), bladeMat);
     tip.rotation.x = Math.PI / 2;
     tip.position.z = -1.14;
     const guard = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.06, 0.08), darkMat);
     guard.position.z = 0.08;
-    group.add(blade, tip, guard);
+    group.add(blade, oxidePatch, tip, guard);
   } else if (skin.shape === 'gut') {
     addGrip(0.58, 0.07);
     const blade = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.82, 5, 12), bladeMat);
@@ -864,7 +957,9 @@ function makeKnifeSkinModel(skinId: string) {
     const hook = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.025, 8, 20, Math.PI * 0.85), bladeMat);
     hook.rotation.set(Math.PI / 2, 0, 0.45);
     hook.position.set(0.14, 0, -0.9);
-    group.add(blade, hook);
+    const inlay = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.055, 0.62), accentMat);
+    inlay.position.z = -0.46;
+    group.add(blade, hook, inlay);
   } else {
     addGrip(0.72, 0.058);
     const blade = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.045, 1.36), bladeMat);
@@ -887,6 +982,15 @@ function makeKnifeSkinModel(skinId: string) {
 
 function makeHeldItemModel(kind: PickupKind, knifeSkinId: string) {
   return kind === 'knife' ? makeKnifeSkinModel(knifeSkinId) : makePickup(kind);
+}
+
+function knifePreviewStyle(skin: KnifeSkin): CSSProperties {
+  const visual = KNIFE_SKIN_VISUALS[skin.id] ?? KNIFE_SKIN_VISUALS.butterfly_fade;
+  return {
+    background: visual.ui,
+    clipPath: visual.clip,
+    boxShadow: `0 0 18px ${SKIN_RARITY_COLORS[skin.rarity]}33`,
+  };
 }
 
 function makeFortress(x: number, z: number, fake = false) {
@@ -1286,6 +1390,69 @@ function makeTreeStump() {
   return group;
 }
 
+function makeReedCluster() {
+  const group = new THREE.Group();
+  const reedMat = new THREE.MeshStandardMaterial({ color: 0x6f7d48, map: worldTextures().grass, bumpMap: worldTextures().grass, bumpScale: 0.03, roughness: 0.96 });
+  const cattailMat = new THREE.MeshStandardMaterial({ color: 0x5a3520, roughness: 0.9 });
+  for (let i = 0; i < 9; i++) {
+    const height = randomRange(0.85, 1.7);
+    const reed = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.018, height, 5), reedMat);
+    reed.position.set(randomRange(-0.7, 0.7), height / 2, randomRange(-0.55, 0.55));
+    reed.rotation.z = randomRange(-0.14, 0.14);
+    reed.castShadow = true;
+    group.add(reed);
+    if (i % 3 === 0) {
+      const head = new THREE.Mesh(new THREE.CapsuleGeometry(0.04, 0.18, 5, 8), cattailMat);
+      head.position.set(reed.position.x, height + 0.07, reed.position.z);
+      head.castShadow = true;
+      group.add(head);
+    }
+  }
+  return group;
+}
+
+function makeFallenLog() {
+  const group = new THREE.Group();
+  const barkMat = new THREE.MeshStandardMaterial({ color: 0x4d3425, map: worldTextures().bark, bumpMap: worldTextures().bark, bumpScale: 0.08, roughness: 0.94 });
+  const cutMat = new THREE.MeshStandardMaterial({ color: 0x9c7650, roughness: 0.86 });
+  const log = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 2.7, 10), barkMat);
+  log.rotation.z = Math.PI / 2;
+  log.position.y = 0.33;
+  log.castShadow = true;
+  log.receiveShadow = true;
+  group.add(log);
+  for (const x of [-1.36, 1.36]) {
+    const cut = new THREE.Mesh(new THREE.CylinderGeometry(0.285, 0.285, 0.035, 14), cutMat);
+    cut.rotation.z = Math.PI / 2;
+    cut.position.set(x, 0.33, 0);
+    group.add(cut);
+  }
+  for (let i = 0; i < 4; i++) {
+    const mushroom = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.055, 0.11, 5, 7),
+      new THREE.MeshStandardMaterial({ color: i % 2 === 0 ? 0xd6c18a : 0x9d6d55, roughness: 0.82 }),
+    );
+    mushroom.position.set(randomRange(-0.9, 0.9), 0.22, randomRange(-0.38, 0.38));
+    group.add(mushroom);
+  }
+  return group;
+}
+
+function makeTrailStonePatch() {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x77746a, map: worldTextures().rock, bumpMap: worldTextures().rock, bumpScale: 0.08, roughness: 0.98, flatShading: true });
+  for (let i = 0; i < 8; i++) {
+    const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(randomRange(0.18, 0.42), 0), mat);
+    stone.position.set((i - 3.5) * randomRange(0.55, 0.86), randomRange(0.04, 0.1), randomRange(-0.55, 0.55));
+    stone.scale.set(randomRange(1.1, 1.9), randomRange(0.2, 0.45), randomRange(0.7, 1.35));
+    stone.rotation.set(randomRange(0, 0.7), randomRange(0, Math.PI), randomRange(0, 0.7));
+    stone.castShadow = true;
+    stone.receiveShadow = true;
+    group.add(stone);
+  }
+  return group;
+}
+
 function makeHouse(mood: NpcMood) {
   const group = new THREE.Group();
   const wallColor = mood === 'good' ? 0x6f7f63 : mood === 'evil' ? 0x4f3a35 : 0x746957;
@@ -1472,7 +1639,7 @@ function makeWorldChunk(cx: number, cz: number) {
   const terrainRoll = hash2(cx, cz, 1);
   const groundColor = terrainRoll > 0.72 ? 0x59633d : terrainRoll > 0.44 ? 0x6f7d48 : 0x7f884d;
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(CHUNK_SIZE + 2, CHUNK_SIZE + 2, 8, 8),
+    new THREE.PlaneGeometry(CHUNK_SIZE + 2, CHUNK_SIZE + 2, 14, 14),
     makeGroundShaderMaterial(seed + groundColor * 0.000001),
   );
   ground.userData.shader = 'ground';
@@ -1481,7 +1648,7 @@ function makeWorldChunk(cx: number, cz: number) {
   ground.receiveShadow = true;
   group.add(ground);
 
-  const grassCount = terrainRoll > 0.72 ? 46 : terrainRoll > 0.38 ? 92 : 66;
+  const grassCount = terrainRoll > 0.72 ? 78 : terrainRoll > 0.38 ? 142 : 112;
   group.add(makeSteppeGrassPatch(cx, cz, grassCount));
 
   const riverBand = Math.abs(Math.sin(cx * 0.62 + cz * 0.38)) < 0.18;
@@ -1490,6 +1657,14 @@ function makeWorldChunk(cx: number, cz: number) {
     river.rotation.y = Math.sin((cx + cz) * 0.7) * 0.65;
     group.add(river);
     obstacles.push({ x: 0, z: 0, radius: CHUNK_SIZE * 0.54, kind: 'water' });
+    for (let i = 0; i < 8; i++) {
+      const reeds = makeReedCluster();
+      const side = i % 2 === 0 ? -1 : 1;
+      reeds.position.set(chunkRandom(cx, cz, i + 830, -38, 38), 0, side * chunkRandom(cx, cz, i + 850, 10.8, 16.8));
+      reeds.rotation.y = chunkRandom(cx, cz, i + 870, 0, Math.PI * 2);
+      reeds.scale.setScalar(chunkRandom(cx, cz, i + 890, 0.75, 1.35));
+      group.add(reeds);
+    }
   }
 
   if (terrainRoll > 0.76) {
@@ -1513,6 +1688,16 @@ function makeWorldChunk(cx: number, cz: number) {
       obstacles.push({ x: tree.position.x, z: tree.position.z, radius: 0.72 * scale, kind: 'solid' });
       group.add(tree);
     }
+    const logCount = 2 + Math.floor(hash2(cx, cz, 910) * 3);
+    for (let i = 0; i < logCount; i++) {
+      const log = makeFallenLog();
+      log.position.set(chunkRandom(cx, cz, i + 930, -35, 35), 0, chunkRandom(cx, cz, i + 950, -35, 35));
+      log.rotation.y = chunkRandom(cx, cz, i + 970, 0, Math.PI * 2);
+      const scale = chunkRandom(cx, cz, i + 990, 0.7, 1.35);
+      log.scale.setScalar(scale);
+      obstacles.push({ x: log.position.x, z: log.position.z, radius: 1.25 * scale, kind: 'solid' });
+      group.add(log);
+    }
   } else {
     const count = 4 + Math.floor(hash2(cx, cz, 5) * 8);
     for (let i = 0; i < count; i++) {
@@ -1525,13 +1710,22 @@ function makeWorldChunk(cx: number, cz: number) {
     }
   }
 
-  const detailCount = 5 + Math.floor(hash2(cx, cz, 540) * 9);
+  const detailCount = 10 + Math.floor(hash2(cx, cz, 540) * 13);
   for (let i = 0; i < detailCount; i++) {
     const detail = makeDetailPatch(i + cx * 17 + cz * 31);
     detail.position.set(chunkRandom(cx, cz, i + 560, -42, 42), 0, chunkRandom(cx, cz, i + 590, -42, 42));
     detail.rotation.y = chunkRandom(cx, cz, i + 620, 0, Math.PI * 2);
     detail.scale.setScalar(chunkRandom(cx, cz, i + 650, 0.55, 1.35));
     group.add(detail);
+  }
+
+  const trailCount = 1 + Math.floor(hash2(cx, cz, 1010) * 3);
+  for (let i = 0; i < trailCount; i++) {
+    const stones = makeTrailStonePatch();
+    stones.position.set(chunkRandom(cx, cz, i + 1030, -34, 34), 0, chunkRandom(cx, cz, i + 1050, -34, 34));
+    stones.rotation.y = chunkRandom(cx, cz, i + 1070, 0, Math.PI * 2);
+    stones.scale.setScalar(chunkRandom(cx, cz, i + 1090, 0.72, 1.45));
+    group.add(stones);
   }
 
   if (terrainRoll > 0.34 && terrainRoll < 0.72) {
@@ -1570,8 +1764,87 @@ function addInventoryItem(items: InventoryEntry[], kind: PickupKind) {
   return [...items];
 }
 
-function isWeapon(kind: PickupKind): kind is WeaponKind {
+function isWeapon(kind: string): kind is WeaponKind {
   return kind === 'knife' || kind === 'club' || kind === 'sabre' || kind === 'rifle';
+}
+
+function isDifficulty(value: string): value is Difficulty {
+  return value === 'story' || value === 'survival' || value === 'nightmare';
+}
+
+function isPickupKind(value: string): value is PickupKind {
+  return value === 'medkit' || value === 'crystal' || value === 'key' || value === 'code' || value === 'revive' || isWeapon(value);
+}
+
+function isQuestItem(value: unknown): value is QuestItem {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.x === 'number' && typeof item.z === 'number' && typeof item.collected === 'boolean';
+}
+
+function isStoryFlags(value: unknown): value is StoryFlags {
+  if (!value || typeof value !== 'object') return false;
+  const flags = value as Record<string, unknown>;
+  return typeof flags.trust === 'number' && typeof flags.lore === 'number' && typeof flags.risk === 'number' && typeof flags.cruelty === 'number';
+}
+
+function isInventoryEntry(value: unknown): value is InventoryEntry {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry.kind === 'string' && isPickupKind(entry.kind) && typeof entry.count === 'number';
+}
+
+function parseSavedGameState(value: unknown): SavedGameState | null {
+  if (!value || typeof value !== 'object') return null;
+  const state = value as Record<string, unknown>;
+  const player = state.player as Record<string, unknown> | undefined;
+  if (!player || typeof player.x !== 'number' || typeof player.z !== 'number') return null;
+  if (
+    typeof state.hp !== 'number' ||
+    typeof state.score !== 'number' ||
+    typeof state.dayTime !== 'number' ||
+    typeof state.stamina !== 'number' ||
+    typeof state.selectedSlot !== 'number' ||
+    typeof state.heldItem !== 'string' ||
+    !isPickupKind(state.heldItem) ||
+    typeof state.weapon !== 'string' ||
+    !isWeapon(state.weapon) ||
+    !isStoryFlags(state.storyFlags) ||
+    !isQuestItem(state.key) ||
+    !isQuestItem(state.code) ||
+    !isQuestItem(state.revive) ||
+    typeof state.traderCoordsBought !== 'boolean' ||
+    typeof state.companionRecruited !== 'boolean' ||
+    typeof state.companionAlive !== 'boolean' ||
+    typeof state.companionHp !== 'number' ||
+    !Array.isArray(state.inventory) ||
+    !state.inventory.every(isInventoryEntry) ||
+    !Array.isArray(state.houseVisitedIds) ||
+    !state.houseVisitedIds.every((id) => typeof id === 'number')
+  ) {
+    return null;
+  }
+
+  return {
+    player: { x: player.x, z: player.z },
+    hp: state.hp,
+    score: state.score,
+    dayTime: state.dayTime,
+    stamina: state.stamina,
+    inventory: state.inventory,
+    selectedSlot: state.selectedSlot,
+    heldItem: state.heldItem,
+    weapon: state.weapon,
+    storyFlags: state.storyFlags,
+    key: state.key,
+    code: state.code,
+    revive: state.revive,
+    traderCoordsBought: state.traderCoordsBought,
+    companionRecruited: state.companionRecruited,
+    companionAlive: state.companionAlive,
+    companionHp: state.companionHp,
+    houseVisitedIds: state.houseVisitedIds,
+  };
 }
 
 function storyScore(flags: StoryFlags) {
@@ -1744,7 +2017,7 @@ function playJumpscareSfx() {
   }
 }
 
-export function QasqyrGame({ onExit }: { onExit?: () => void }) {
+export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const keysRef = useRef(new Set<string>());
   const playerRef = useRef(new THREE.Vector3(0, 0, START_Z));
@@ -1790,10 +2063,13 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
   const [phase, setPhase] = useState<GamePhase>('intro');
   const [difficulty, setDifficulty] = useState<Difficulty>('survival');
   const [activeMenuTab, setActiveMenuTab] = useState<MenuTab>('modes');
-  const [selectedKnifeSkinId, setSelectedKnifeSkinId] = useState(KNIFE_SKINS.find((skin) => skin.unlocked)?.id ?? KNIFE_SKINS[0].id);
-  const [wallet, setWallet] = useState({ gold: 900, premium: 45 });
+  const [unlockedSkinIds, setUnlockedSkinIds] = useState<string[]>(STARTING_UNLOCKED_SKINS);
+  const [selectedKnifeSkinId, setSelectedKnifeSkinId] = useState(FREE_KNIFE_SKIN_ID);
+  const [wallet, setWallet] = useState(STARTING_WALLET);
   const [caseLog, setCaseLog] = useState('Магазин готов: выбери кейс и валюту.');
   const [caseOpening, setCaseOpening] = useState<CaseOpening | null>(null);
+  const [progressLoaded, setProgressLoaded] = useState(!userId);
+  const [savedGameState, setSavedGameState] = useState<SavedGameState | null>(null);
   const [vision, setVision] = useState<VisionKind>('');
   const [ending, setEnding] = useState('');
   const [taunt, setTaunt] = useState('');
@@ -1832,6 +2108,177 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     inventory: [] as InventoryEntry[],
     hint: hintRef.current,
   });
+
+  const buildSavedGameState = useCallback((): SavedGameState => ({
+    player: { x: playerRef.current.x, z: playerRef.current.z },
+    hp: hpRef.current,
+    score: scoreRef.current,
+    dayTime: dayTimeRef.current,
+    stamina: staminaRef.current,
+    inventory: inventoryRef.current,
+    selectedSlot: selectedSlotRef.current,
+    heldItem: heldItemRef.current,
+    weapon: weaponRef.current,
+    storyFlags: storyFlagsRef.current,
+    key: keyRef.current,
+    code: codeRef.current,
+    revive: reviveRef.current,
+    traderCoordsBought: traderCoordsBoughtRef.current,
+    companionRecruited: companionRecruitedRef.current,
+    companionAlive: companionAliveRef.current,
+    companionHp: companionHpRef.current,
+    houseVisitedIds: houseNpcsRef.current.filter((npc) => npc.visited).map((npc) => npc.id),
+  }), []);
+
+  const saveProgress = useCallback(async (stateOverride?: SavedGameState | null) => {
+    if (!userId) return;
+    const state = stateOverride === undefined ? buildSavedGameState() : stateOverride;
+    const { error } = await supabase.from('game_progress').upsert({
+      user_id: userId,
+      gold: wallet.gold,
+      diamonds: wallet.premium,
+      unlocked_skins: unlockedSkinIds,
+      selected_knife_skin_id: selectedKnifeSkinId,
+      difficulty,
+      game_state: state ?? {},
+      updated_at: new Date().toISOString(),
+    });
+    if (error) {
+      console.error('Failed to save game progress', error.message);
+    }
+  }, [buildSavedGameState, difficulty, selectedKnifeSkinId, unlockedSkinIds, userId, wallet.gold, wallet.premium]);
+
+  const refreshHudFromRefs = useCallback(() => {
+    const balance = DIFFICULTY[difficultyRef.current];
+    setHud((current) => ({
+      ...current,
+      hp: Math.max(0, Math.ceil(hpRef.current)),
+      score: scoreRef.current,
+      distance: Math.max(0, Math.round(((playerRef.current.z - FINISH_Z) / (START_Z - FINISH_Z)) * 100)),
+      nextEvent: Math.ceil(nextEventRef.current),
+      event: eventKindRef.current ? EVENT_LABELS[eventKindRef.current] : '',
+      eventLeft: Math.ceil(eventTimerRef.current),
+      timeOfDay: dayPhaseLabel(dayPhaseAt(dayTimeRef.current)),
+      stamina: Math.ceil(staminaRef.current),
+      walkMode: walkModeLabel(walkModeRef.current),
+      difficulty: balance.label,
+      story: storyScore(storyFlagsRef.current),
+      weapon: WEAPONS[weaponRef.current].name,
+      heldItem: ITEM_LABELS[heldItemRef.current],
+      selectedSlot: selectedSlotRef.current,
+      dimension: dimensionRef.current === 'hloddev' ? 'Хлоддев' : 'Степь',
+      teleport: Math.ceil(teleportCooldownRef.current),
+      dimensionLeft: Math.ceil(dimensionTimerRef.current),
+      hasKey: keyRef.current.collected,
+      hasCode: codeRef.current.collected,
+      traderNav: questNav(playerRef.current, navPoint(HOUSE_NPCS.find((npc) => npc.id === TRADER_NPC_ID)?.x ?? 0, HOUSE_NPCS.find((npc) => npc.id === TRADER_NPC_ID)?.z ?? 0)),
+      companionNav: questNav(playerRef.current, navPoint(COMPANION_HOUSE.x, COMPANION_HOUSE.z)),
+      reviveNav: questNav(playerRef.current, reviveRef.current),
+      coordsBought: traderCoordsBoughtRef.current,
+      companionRecruited: companionRecruitedRef.current,
+      companionAlive: companionAliveRef.current,
+      reviveVisible: companionRecruitedRef.current && !companionAliveRef.current && !reviveRef.current.collected,
+      keyNav: questNav(playerRef.current, keyRef.current),
+      codeNav: questNav(playerRef.current, codeRef.current),
+      inventory: [...inventoryRef.current],
+      hint: hintRef.current,
+    }));
+  }, []);
+
+  const applySavedGameState = useCallback((state: SavedGameState) => {
+    playerRef.current.set(state.player.x, terrainHeightAt(state.player.x, state.player.z), state.player.z);
+    hpRef.current = state.hp;
+    scoreRef.current = state.score;
+    dayTimeRef.current = state.dayTime;
+    staminaRef.current = state.stamina;
+    inventoryRef.current = state.inventory.length > 0 ? state.inventory : [{ kind: 'knife', count: 1 }];
+    selectedSlotRef.current = clamp(Math.floor(state.selectedSlot), 0, Math.max(0, inventoryRef.current.length - 1));
+    heldItemRef.current = state.heldItem;
+    weaponRef.current = state.weapon;
+    storyFlagsRef.current = state.storyFlags;
+    keyRef.current = state.key;
+    codeRef.current = state.code;
+    reviveRef.current = state.revive;
+    traderCoordsBoughtRef.current = state.traderCoordsBought;
+    companionRecruitedRef.current = state.companionRecruited;
+    companionAliveRef.current = state.companionAlive;
+    companionHpRef.current = state.companionHp;
+    houseNpcsRef.current = HOUSE_NPCS.map((npc) => ({ ...npc, visited: state.houseVisitedIds.includes(npc.id) }));
+    hintRef.current = 'Прогресс загружен: ты продолжаешь с места последнего сохранения.';
+    refreshHudFromRefs();
+  }, [refreshHudFromRefs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!userId) {
+      setProgressLoaded(true);
+      setWallet(STARTING_WALLET);
+      setUnlockedSkinIds(STARTING_UNLOCKED_SKINS);
+      setSelectedKnifeSkinId(FREE_KNIFE_SKIN_ID);
+      setSavedGameState(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setProgressLoaded(false);
+    supabase
+      .from('game_progress')
+      .select('gold, diamonds, unlocked_skins, selected_knife_skin_id, difficulty, game_state')
+      .eq('user_id', userId)
+      .maybeSingle()
+      .then(async ({ data, error }) => {
+        if (cancelled) return;
+        if (error) console.error('Failed to load game progress', error.message);
+        if (!data) {
+          await supabase.from('game_progress').insert({ user_id: userId });
+          setWallet(STARTING_WALLET);
+          setUnlockedSkinIds(STARTING_UNLOCKED_SKINS);
+          setSelectedKnifeSkinId(FREE_KNIFE_SKIN_ID);
+          setSavedGameState(null);
+          setProgressLoaded(true);
+          return;
+        }
+
+        const row = data as GameProgressRow;
+        const unlocked = row.unlocked_skins.includes(FREE_KNIFE_SKIN_ID)
+          ? row.unlocked_skins
+          : [FREE_KNIFE_SKIN_ID, ...row.unlocked_skins];
+        const selected = unlocked.includes(row.selected_knife_skin_id) ? row.selected_knife_skin_id : FREE_KNIFE_SKIN_ID;
+        setWallet({ gold: Math.max(0, row.gold), premium: Math.max(0, row.diamonds) });
+        setUnlockedSkinIds(unlocked);
+        setSelectedKnifeSkinId(selected);
+        if (isDifficulty(row.difficulty)) {
+          setDifficulty(row.difficulty);
+          difficultyRef.current = row.difficulty;
+        }
+        setSavedGameState(parseSavedGameState(row.game_state));
+        setProgressLoaded(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!progressLoaded || !userId) return;
+    void saveProgress(savedGameState);
+  }, [difficulty, progressLoaded, saveProgress, savedGameState, selectedKnifeSkinId, unlockedSkinIds, userId, wallet.gold, wallet.premium]);
+
+  useEffect(() => {
+    if (!userId || phase !== 'playing') return;
+    const timer = window.setInterval(() => {
+      void saveProgress();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [phase, saveProgress, userId]);
+
+  useEffect(() => {
+    if (!userId || (phase !== 'won' && phase !== 'lost')) return;
+    setSavedGameState(null);
+    void saveProgress(null);
+  }, [phase, saveProgress, userId]);
 
   const reset = () => {
     difficultyRef.current = difficulty;
@@ -3402,9 +3849,29 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     };
   }, [phase, onExit]);
 
-  const start = () => {
+  const start = (useSavedState: boolean) => {
     reset();
+    if (useSavedState && savedGameState) {
+      applySavedGameState(savedGameState);
+    }
     setPhase('playing');
+  };
+
+  const openTutorial = () => {
+    setPhase('tutorial');
+  };
+
+  const handleMainPlay = () => {
+    if (phase === 'intro') {
+      openTutorial();
+      return;
+    }
+    if (phase === 'tutorial') {
+      start(!!savedGameState);
+      return;
+    }
+    setSavedGameState(null);
+    start(false);
   };
 
   const exit = () => {
@@ -3426,6 +3893,9 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
 
       const nextWallet = { ...current, [currency]: current[currency] - price };
       const reward = pickCaseReward(isPremium);
+      if ('id' in reward) {
+        setUnlockedSkinIds((ids) => (ids.includes(reward.id) ? ids : [...ids, reward.id]));
+      }
       setCaseOpening({
         caseType,
         rewardName: reward.name,
@@ -3438,6 +3908,19 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       setCaseLog(message);
       return nextWallet;
     });
+  };
+
+  const awardDialogReward = (success: boolean) => {
+    const reward = success ? DIALOG_REWARD.success : DIALOG_REWARD.fail;
+    setWallet((current) => ({
+      gold: current.gold + reward.gold,
+      premium: current.premium + reward.premium,
+    }));
+    setCaseLog(
+      success
+        ? `Диалог успешен: +${reward.gold} золота и +${reward.premium} алмазов.`
+        : `Диалог неудачный: +${reward.gold} золота и +${reward.premium} алмаз.`,
+    );
   };
 
   const askGeminiHint = async () => {
@@ -3509,6 +3992,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     if (dialog && dialog.step < 2 && choice.effect !== 'trade' && dialog.npc.id !== COMPANION_HOUSE.id) {
       storyFlagsRef.current.lore += 1;
       scoreRef.current += 3;
+      awardDialogReward(true);
       hintRef.current = choice.reply;
       setDialog({ ...dialog, step: dialog.step + 1, lastReply: choice.reply });
       setHud((h) => ({
@@ -3524,6 +4008,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     if (choice.effect === 'trade') {
       const medkits = inventoryRef.current.find((item) => item.kind === 'medkit');
       if (!medkits || medkits.count < TRADER_PRICE_MEDKITS) {
+        awardDialogReward(false);
         reply = `Жанату нужно ${TRADER_PRICE_MEDKITS} аптечек. Собери их и вернись к лавке.`;
         hintRef.current = reply;
         setDialog(dialog ? { ...dialog, lastReply: reply } : null);
@@ -3585,6 +4070,8 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       storyFlagsRef.current.lore += 2;
       scoreRef.current += 5;
     }
+
+    awardDialogReward(!(choice.effect === 'damage' || choice.effect === 'steal' || choice.effect === 'ambush'));
 
     if (activeNpcId !== undefined) {
       const npc = houseNpcsRef.current.find((item) => item.id === activeNpcId);
@@ -3726,7 +4213,10 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
                     <button
                       key={level}
                       type="button"
-                      onClick={() => setDifficulty(level)}
+                      onClick={() => {
+                        setDifficulty(level);
+                        setSavedGameState(null);
+                      }}
                       style={difficulty === level ? styles.difficultySelected : styles.difficultyButton}
                     >
                       <b>{DIFFICULTY[level].label}</b>
@@ -3739,23 +4229,28 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
               {activeMenuTab === 'skins' && (
                 <div style={styles.skinGrid}>
                   {KNIFE_SKINS.map((skin) => (
+                    (() => {
+                      const unlocked = unlockedSkinIds.includes(skin.id);
+                      return (
                     <button
                       key={skin.id}
                       type="button"
-                      disabled={!skin.unlocked}
+                      disabled={!unlocked}
                       onClick={() => setSelectedKnifeSkinId(skin.id)}
                       style={{
                         ...styles.skinCard,
                         borderColor: selectedKnifeSkinId === skin.id ? SKIN_RARITY_COLORS[skin.rarity] : 'rgba(255,255,255,.16)',
-                        opacity: skin.unlocked ? 1 : 0.54,
+                        opacity: unlocked ? 1 : 0.54,
                       }}
                     >
-                      <span style={styles.skinBlade} />
+                      <span style={{ ...styles.skinBlade, ...knifePreviewStyle(skin) }} />
                       <b>{skin.name}</b>
                       <span>{skin.shape}</span>
                       <small style={{ color: SKIN_RARITY_COLORS[skin.rarity] }}>{skin.rarity}</small>
-                      <span>{skin.unlocked ? (selectedKnifeSkinId === skin.id ? 'Выбран' : 'Разблокирован') : 'Заблокирован'}</span>
+                      <span>{unlocked ? (selectedKnifeSkinId === skin.id ? 'Выбран' : 'Разблокирован') : 'Заблокирован'}</span>
                     </button>
+                      );
+                    })()
                   ))}
                 </div>
               )}
@@ -3801,9 +4296,29 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
               )}
             </>
           )}
+          {phase === 'tutorial' && (
+            <div style={styles.tutorialPanel}>
+              <div style={styles.tutorialItem}>
+                <b>Цель</b>
+                <span>Найди ключ и код, поговори с выжившими и доберись до крепости.</span>
+              </div>
+              <div style={styles.tutorialItem}>
+                <b>Выживание</b>
+                <span>Собирай аптечки, оружие и кристаллы. Стрелки ведут к важным точкам.</span>
+              </div>
+              <div style={styles.tutorialItem}>
+                <b>Экономика</b>
+                <span>Успешные диалоги дают 50 золота и 5 алмазов, неудачные дают 10 золота и 1 алмаз.</span>
+              </div>
+              <div style={styles.tutorialItem}>
+                <b>Прогресс</b>
+                <span>{userId ? 'Аккаунт сохраняет место, кошелек, ножи и квесты автоматически.' : 'Гость играет без облачного сохранения аккаунта.'}</span>
+              </div>
+            </div>
+          )}
           <div style={styles.controls}>WASD - движение · мышь - прицел · клик - удар · Space - Хлоддев · Esc - выход</div>
-          <button type="button" onClick={start} style={styles.play}>
-            {phase === 'intro' ? 'Играть' : 'Еще раз'}
+          <button type="button" onClick={handleMainPlay} disabled={!progressLoaded} style={styles.play}>
+            {!progressLoaded ? 'Загрузка...' : phase === 'intro' ? (savedGameState ? 'Продолжить' : 'Играть') : phase === 'tutorial' ? 'Понятно, начать' : 'Еще раз'}
           </button>
         </section>
       )}
@@ -4833,6 +5348,24 @@ const styles: Record<string, CSSProperties> = {
     color: '#ffd37b',
     lineHeight: 1.5,
     fontWeight: 800,
+  },
+  tutorialPanel: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 10,
+    margin: '0 0 18px',
+  },
+  tutorialItem: {
+    minHeight: 96,
+    display: 'grid',
+    alignContent: 'start',
+    gap: 8,
+    padding: '13px 14px',
+    border: '1px solid rgba(255,255,255,.14)',
+    borderRadius: 8,
+    background: 'rgba(0,0,0,.18)',
+    color: '#d8d1c3',
+    lineHeight: 1.4,
   },
   vision: {
     position: 'fixed',
