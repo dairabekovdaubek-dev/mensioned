@@ -13,10 +13,18 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      if (data.session && window.localStorage.getItem('qasqyr-open-mode-select') === '1') {
+        window.localStorage.removeItem('qasqyr-open-mode-select');
+        setPlaying(true);
+      }
       setLoading(false);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
+      if (s && window.localStorage.getItem('qasqyr-open-mode-select') === '1') {
+        window.localStorage.removeItem('qasqyr-open-mode-select');
+        setPlaying(true);
+      }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -46,7 +54,14 @@ export default function App() {
       </header>
 
       {playing && <QasqyrGame onExit={() => setPlaying(false)} />}
-      {!session ? <Auth onPlayAsGuest={() => setPlaying(true)} /> : <Entries userEmail={session.user.email ?? ''} />}
+      {!session ? (
+        <Auth
+          onPlayAsGuest={() => setPlaying(true)}
+          onAuthStarted={() => window.localStorage.setItem('qasqyr-open-mode-select', '1')}
+        />
+      ) : (
+        <Entries userEmail={session.user.email ?? ''} />
+      )}
     </main>
   );
 }
