@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { supabase } from '../lib/supabase';
 
@@ -15,6 +15,7 @@ type Difficulty = 'story' | 'survival' | 'nightmare';
 type MenuTab = 'modes' | 'skins' | 'shop';
 type SkinRarity = 'Common' | 'Rare' | 'Epic' | 'Legendary';
 type KnifeShape = 'butterfly' | 'stiletto' | 'karambit' | 'bowie' | 'gut' | 'bayonet';
+type CaseOpening = { caseType: string; rewardName: string; rarity: SkinRarity; isPremium: boolean; nonce: number };
 type VisionKind = '' | 'bloodmoon' | 'echo' | 'whiteout';
 type DayPhase = 'dawn' | 'day' | 'dusk' | 'night';
 type WalkMode = 'walk' | 'sneak' | 'sprint' | 'tired';
@@ -138,6 +139,7 @@ const DAY_LENGTH = 210;
 const STAMINA_MAX = 100;
 const TRADER_NPC_ID = 8;
 const TRADER_PRICE_MEDKITS = 5;
+const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`;
 const COMPANION_HOUSE: HouseNpc = {
   id: 99,
   name: 'Саят',
@@ -152,26 +154,26 @@ const COMPANION_HOUSE: HouseNpc = {
   visited: false,
 };
 const OUTFIT_URLS: Record<OutfitKind, string> = {
-  maleRanger: '/models/outfits/fantasy/Male_Ranger.gltf',
-  femaleRanger: '/models/outfits/fantasy/Female_Ranger.gltf',
-  malePeasant: '/models/outfits/fantasy/Male_Peasant.gltf',
-  femalePeasant: '/models/outfits/fantasy/Female_Peasant.gltf',
+  maleRanger: assetPath('models/outfits/fantasy/Male_Ranger.gltf'),
+  femaleRanger: assetPath('models/outfits/fantasy/Female_Ranger.gltf'),
+  malePeasant: assetPath('models/outfits/fantasy/Male_Peasant.gltf'),
+  femalePeasant: assetPath('models/outfits/fantasy/Female_Peasant.gltf'),
 };
 const PLAYER_OUTFIT_BY_DIFFICULTY: Record<Difficulty, OutfitKind> = {
   story: 'femalePeasant',
   survival: 'maleRanger',
   nightmare: 'femaleRanger',
 };
-const ANIMATION_LIBRARY_URL = '/models/animations/ual2-standard.glb';
+const ANIMATION_LIBRARY_URL = assetPath('models/animations/ual2-standard.glb');
 const MEDIEVAL_PROP_URLS: Record<MedievalPropKind, string> = {
-  wagon: '/models/medieval/Prop_Wagon.gltf',
-  crate: '/models/medieval/Prop_Crate.gltf',
-  woodFence: '/models/medieval/Prop_WoodenFence_Single.gltf',
-  metalFence: '/models/medieval/Prop_MetalFence_Simple.gltf',
-  roundDoor: '/models/medieval/Door_1_Round.gltf',
-  roundRoof: '/models/medieval/Roof_2x4_RoundTile.gltf',
-  vine: '/models/medieval/Prop_Vine1.gltf',
-  chimney: '/models/medieval/Prop_Chimney.gltf',
+  wagon: assetPath('models/medieval/Prop_Wagon.gltf'),
+  crate: assetPath('models/medieval/Prop_Crate.gltf'),
+  woodFence: assetPath('models/medieval/Prop_WoodenFence_Single.gltf'),
+  metalFence: assetPath('models/medieval/Prop_MetalFence_Simple.gltf'),
+  roundDoor: assetPath('models/medieval/Door_1_Round.gltf'),
+  roundRoof: assetPath('models/medieval/Roof_2x4_RoundTile.gltf'),
+  vine: assetPath('models/medieval/Prop_Vine1.gltf'),
+  chimney: assetPath('models/medieval/Prop_Chimney.gltf'),
 };
 
 const DIFFICULTY: Record<Difficulty, {
@@ -203,6 +205,22 @@ const KNIFE_SKINS: KnifeSkin[] = [
   new KnifeSkin('gut_kumys', 'Gut Kumys', 'Rare', 'gut', true),
   new KnifeSkin('bayonet_hloddev', 'Bayonet Hloddev', 'Epic', 'bayonet', true),
 ];
+
+const CASE_BONUS_REWARDS: { name: string; rarity: SkinRarity }[] = [
+  { name: 'Shadow Talon Finish', rarity: 'Rare' },
+  { name: 'Nomad Bone Handle', rarity: 'Epic' },
+  { name: 'Wolfmark Gold Edge', rarity: 'Legendary' },
+];
+
+const pickCaseReward = (isPremium: boolean) => {
+  const premiumPool = [
+    ...KNIFE_SKINS.filter((skin) => skin.rarity === 'Epic' || skin.rarity === 'Legendary'),
+    ...CASE_BONUS_REWARDS,
+  ];
+  const regularPool = [...KNIFE_SKINS, ...CASE_BONUS_REWARDS.slice(0, 2)];
+  const pool = isPremium ? premiumPool : regularPool;
+  return pool[Math.floor(Math.random() * pool.length)] ?? KNIFE_SKINS[0];
+};
 
 const CASE_PRICES = {
   gold: 250,
@@ -1775,6 +1793,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
   const [selectedKnifeSkinId, setSelectedKnifeSkinId] = useState(KNIFE_SKINS.find((skin) => skin.unlocked)?.id ?? KNIFE_SKINS[0].id);
   const [wallet, setWallet] = useState({ gold: 900, premium: 45 });
   const [caseLog, setCaseLog] = useState('Магазин готов: выбери кейс и валюту.');
+  const [caseOpening, setCaseOpening] = useState<CaseOpening | null>(null);
   const [vision, setVision] = useState<VisionKind>('');
   const [ending, setEnding] = useState('');
   const [taunt, setTaunt] = useState('');
@@ -2225,6 +2244,21 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     let animationGuide: THREE.Group | null = null;
     let stopped = false;
     const playerOutfitKind = PLAYER_OUTFIT_BY_DIFFICULTY[difficultyRef.current];
+    const loadGltf = (url: string, onLoad: (gltf: GLTF) => void, onError: () => void, attempt = 0) => {
+      gltfLoader.load(
+        url,
+        onLoad,
+        undefined,
+        () => {
+          if (stopped) return;
+          if (attempt < 2) {
+            window.setTimeout(() => loadGltf(url, onLoad, onError, attempt + 1), 450 * (attempt + 1));
+            return;
+          }
+          onError();
+        },
+      );
+    };
 
     const attachPlayerAnimator = () => {
       if (!outfitModel || playerAnimator || animationClips.length === 0) return;
@@ -2245,6 +2279,15 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       for (const part of player.children) {
         if (part !== outfitModel && part !== hloodAura && part !== heldWeaponModel) part.visible = false;
       }
+    };
+    const attachBestLoadedPlayerOutfit = () => {
+      const template =
+        outfitTemplates[playerOutfitKind] ??
+        outfitTemplates.maleRanger ??
+        outfitTemplates.femaleRanger ??
+        outfitTemplates.malePeasant ??
+        outfitTemplates.femalePeasant;
+      if (template) attachPlayerOutfit(template);
     };
     const removeMixer = (mixer: THREE.AnimationMixer | undefined) => {
       if (!mixer) return;
@@ -2448,7 +2491,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     };
 
     for (const [kind, url] of Object.entries(OUTFIT_URLS) as [OutfitKind, string][]) {
-      gltfLoader.load(
+      loadGltf(
         url,
         (gltf) => {
           if (stopped) return;
@@ -2458,12 +2501,12 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
           outfitTemplates[kind] = template;
 
           if (kind === playerOutfitKind) attachPlayerOutfit(template);
+          attachBestLoadedPlayerOutfit();
 
           replaceFallbackEnemies();
           replaceFallbackNpcs();
           replaceCompanionFallback();
         },
-        undefined,
         () => {
           hintRef.current = 'Не удалось загрузить один из fantasy outfit ассетов. Игра использует fallback-модель.';
           setHud((h) => ({ ...h, hint: hintRef.current }));
@@ -2472,7 +2515,7 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
     }
 
     for (const [kind, url] of Object.entries(MEDIEVAL_PROP_URLS) as [MedievalPropKind, string][]) {
-      gltfLoader.load(
+      loadGltf(
         url,
         (gltf) => {
           if (stopped) return;
@@ -2481,7 +2524,6 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
           medievalPropTemplates[kind] = template;
           placeMedievalDecor(kind);
         },
-        undefined,
         () => {
           hintRef.current = 'Не удалось загрузить часть Medieval Village декора.';
           setHud((h) => ({ ...h, hint: hintRef.current }));
@@ -2489,11 +2531,12 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       );
     }
 
-    gltfLoader.load(
+    loadGltf(
       ANIMATION_LIBRARY_URL,
       (gltf) => {
         if (stopped) return;
         animationClips = gltf.animations;
+        attachBestLoadedPlayerOutfit();
         attachPlayerAnimator();
         replaceFallbackEnemies();
         replaceFallbackNpcs();
@@ -2515,7 +2558,6 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
           assetMixers.push(mixer);
         }
       },
-      undefined,
       () => {
         hintRef.current = 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ Universal Animation Library.';
         setHud((h) => ({ ...h, hint: hintRef.current }));
@@ -3383,7 +3425,15 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
       }
 
       const nextWallet = { ...current, [currency]: current[currency] - price };
-      const message = `Кейс ${caseType} успешно куплен и открыт за ${price} ${isPremium ? 'алмазов' : 'золота'}.`;
+      const reward = pickCaseReward(isPremium);
+      setCaseOpening({
+        caseType,
+        rewardName: reward.name,
+        rarity: reward.rarity,
+        isPremium,
+        nonce: Date.now(),
+      });
+      const message = `Кейс ${caseType} открыт за ${price} ${isPremium ? 'алмазов' : 'золота'}. Выпало: ${reward.name} (${reward.rarity}).`;
       console.log(message);
       setCaseLog(message);
       return nextWallet;
@@ -3567,6 +3617,32 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
 
   return (
     <div style={styles.root}>
+      <style>
+        {`
+          @keyframes qasqyrCaseShake {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            18% { transform: translateY(-3px) rotate(-1.4deg); }
+            36% { transform: translateY(2px) rotate(1.2deg); }
+            54% { transform: translateY(-2px) rotate(.8deg); }
+            72% { transform: translateY(1px) rotate(-.6deg); }
+          }
+          @keyframes qasqyrCaseLid {
+            0% { transform: translate(-50%, 0) rotateX(0deg); opacity: 1; }
+            55% { transform: translate(-50%, -8px) rotateX(0deg); opacity: 1; }
+            100% { transform: translate(-50%, -42px) rotateX(64deg); opacity: .72; }
+          }
+          @keyframes qasqyrCaseGlow {
+            0% { opacity: 0; transform: scale(.7); }
+            55% { opacity: .18; transform: scale(.88); }
+            100% { opacity: .72; transform: scale(1.18); }
+          }
+          @keyframes qasqyrRewardPop {
+            0%, 48% { opacity: 0; transform: translateY(20px) scale(.86); }
+            72% { opacity: 1; transform: translateY(-4px) scale(1.04); }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
+          }
+        `}
+      </style>
       {phase === 'playing' && <div ref={mountRef} style={styles.mount} />}
       {phase === 'won' && <ZombieCongratsPhoto score={hud.score} />}
 
@@ -3700,6 +3776,26 @@ export function QasqyrGame({ onExit }: { onExit?: () => void }) {
                       <span>{CASE_PRICES.premium} алмазов</span>
                     </button>
                   </div>
+                  {caseOpening && (
+                    <div key={caseOpening.nonce} style={styles.caseStage}>
+                      <div
+                        style={{
+                          ...styles.caseGlow,
+                          background: `radial-gradient(circle, ${SKIN_RARITY_COLORS[caseOpening.rarity]} 0%, rgba(255,255,255,0) 68%)`,
+                        }}
+                      />
+                      <div style={styles.caseLid} />
+                      <div style={styles.caseBox}>
+                        <span style={styles.caseLock}>{caseOpening.isPremium ? '◆' : '●'}</span>
+                        <b>{caseOpening.caseType}</b>
+                      </div>
+                      <div style={{ ...styles.caseReward, borderColor: SKIN_RARITY_COLORS[caseOpening.rarity] }}>
+                        <span style={styles.caseRewardBlade} />
+                        <b>{caseOpening.rewardName}</b>
+                        <small style={{ color: SKIN_RARITY_COLORS[caseOpening.rarity] }}>{caseOpening.rarity}</small>
+                      </div>
+                    </div>
+                  )}
                   <p style={styles.shopLog}>{caseLog}</p>
                 </div>
               )}
@@ -4636,6 +4732,86 @@ const styles: Record<string, CSSProperties> = {
     gap: 6,
     fontWeight: 900,
     cursor: 'pointer',
+  },
+  caseStage: {
+    position: 'relative',
+    minHeight: 178,
+    display: 'grid',
+    placeItems: 'center',
+    overflow: 'hidden',
+    border: '1px solid rgba(255,255,255,.13)',
+    borderRadius: 8,
+    background: 'linear-gradient(180deg, rgba(18,21,22,.74), rgba(7,8,9,.36))',
+  },
+  caseGlow: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    borderRadius: '50%',
+    filter: 'blur(8px)',
+    animation: 'qasqyrCaseGlow .95s ease-out both',
+  },
+  caseLid: {
+    position: 'absolute',
+    left: '50%',
+    top: 44,
+    width: 132,
+    height: 26,
+    border: '1px solid rgba(255,211,123,.48)',
+    borderRadius: '8px 8px 3px 3px',
+    background: 'linear-gradient(180deg, #826235, #2f2418)',
+    boxShadow: '0 12px 22px rgba(0,0,0,.32)',
+    transformOrigin: 'center bottom',
+    animation: 'qasqyrCaseLid .95s ease-out both',
+  },
+  caseBox: {
+    width: 150,
+    minHeight: 82,
+    display: 'grid',
+    placeItems: 'center',
+    gap: 5,
+    border: '1px solid rgba(255,211,123,.34)',
+    borderRadius: 8,
+    background: 'linear-gradient(180deg, #5c4528, #1d1915)',
+    color: '#ffd37b',
+    boxShadow: '0 18px 42px rgba(0,0,0,.34)',
+    animation: 'qasqyrCaseShake .7s ease-in-out both',
+  },
+  caseLock: {
+    width: 30,
+    height: 30,
+    display: 'grid',
+    placeItems: 'center',
+    borderRadius: '50%',
+    background: 'rgba(255,255,255,.12)',
+    color: '#f7e0a3',
+  },
+  caseReward: {
+    position: 'absolute',
+    bottom: 13,
+    left: '50%',
+    width: 'min(88%, 260px)',
+    minHeight: 52,
+    transform: 'translateX(-50%)',
+    display: 'grid',
+    gridTemplateColumns: '54px 1fr auto',
+    alignItems: 'center',
+    gap: 9,
+    padding: '8px 10px',
+    border: '1px solid',
+    borderRadius: 8,
+    background: 'rgba(8,10,11,.86)',
+    color: '#f5efe1',
+    boxShadow: '0 14px 28px rgba(0,0,0,.32)',
+    animation: 'qasqyrRewardPop 1.05s ease-out both',
+  },
+  caseRewardBlade: {
+    width: 48,
+    height: 10,
+    borderRadius: '12px 2px 2px 12px',
+    background: 'linear-gradient(90deg, #1a1e20 0 20%, #f6f3e9 20% 76%, #9fb2bf 76%)',
+    transform: 'rotate(-17deg)',
+    boxShadow: '0 0 14px rgba(255,255,255,.16)',
   },
   shopLog: {
     minHeight: 40,
