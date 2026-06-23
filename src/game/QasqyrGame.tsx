@@ -259,6 +259,34 @@ const WORLD_REAL_TEXTURE_FILES = [
   'service_pistol_diff.jpg',
   'tree_stump_diff.jpg',
 ];
+const GAME_LOADING_TEXTURE_FILES = [
+  ...WORLD_REAL_TEXTURE_FILES.map((file) => `textures/world-real/${file}`),
+  'models/outfits/fantasy/T_Peasant_BaseColor.png',
+  'models/outfits/fantasy/T_Peasant_Normal.png',
+  'models/outfits/fantasy/T_Peasant_ORM.png',
+  'models/outfits/fantasy/T_Ranger_BaseColor.png',
+  'models/outfits/fantasy/T_Ranger_Normal.png',
+  'models/outfits/fantasy/T_Ranger_ORM.png',
+  'models/outfits/fantasy/T_Regular_Female_Dark_BaseColor.png',
+  'models/outfits/fantasy/T_Regular_Female_Normal.png',
+  'models/outfits/fantasy/T_Regular_Female_Roughness.png',
+  'models/outfits/fantasy/T_Regular_Male_Dark_BaseColor.png',
+  'models/outfits/fantasy/T_Regular_Male_Normal.png',
+  'models/outfits/fantasy/T_Regular_Male_Roughness.png',
+  'models/medieval/T_Brick_BaseColor.png',
+  'models/medieval/T_RockTrim_BaseColor.png',
+  'models/medieval/T_RoundTiles_BaseColor.png',
+  'models/medieval/T_VineLeaf_png.png',
+  'models/medieval/T_WoodTrim_BaseColor.png',
+  'models/medieval-village/glTF/T_Brick_BaseColor.png',
+  'models/medieval-village/glTF/T_Noise_Terrain.png',
+  'models/medieval-village/glTF/T_Plaster_BaseColor.png',
+  'models/medieval-village/glTF/T_RockTrim_BaseColor.png',
+  'models/medieval-village/glTF/T_RoundTiles_BaseColor.png',
+  'models/medieval-village/glTF/T_UnevenBrick_BaseColor.png',
+  'models/medieval-village/glTF/T_VineLeaf.png',
+  'models/medieval-village/glTF/T_WoodTrim_BaseColor.png',
+];
 
 const DIFFICULTY: Record<Difficulty, {
   label: string;
@@ -1593,6 +1621,38 @@ function makeCoveredCarWreck() {
   return group;
 }
 
+function makeMedicalSupplyCache() {
+  const group = new THREE.Group();
+  const crateMat = new THREE.MeshStandardMaterial({ color: 0xded8c8, map: worldTextures().medkit, roughness: 0.62 });
+  for (let i = 0; i < 3; i++) {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.62, 0.9), crateMat);
+    box.position.set((i - 1) * 0.86, 0.34 + i * 0.06, i % 2 === 0 ? 0.1 : -0.48);
+    box.rotation.y = randomRange(-0.22, 0.22);
+    box.castShadow = true;
+    box.receiveShadow = true;
+    group.add(box);
+  }
+  const pickup = makePickup('medkit');
+  pickup.position.set(0, 0.64, -1.05);
+  pickup.scale.setScalar(0.85);
+  group.add(pickup);
+  return group;
+}
+
+function makeServicePistolCache() {
+  const group = new THREE.Group();
+  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.5), new THREE.MeshStandardMaterial({ color: 0x4d473d, map: worldTextures().coveredCar, roughness: 0.9 }));
+  cloth.rotation.x = -Math.PI / 2;
+  cloth.position.y = 0.055;
+  group.add(cloth);
+  const pistol = makePickup('rifle');
+  pistol.position.set(0, 0.28, 0);
+  pistol.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+  pistol.scale.setScalar(0.82);
+  group.add(pistol);
+  return group;
+}
+
 function makeWoodenPierPatch() {
   const group = new THREE.Group();
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x8b6948, map: worldTextures().stump, bumpMap: worldTextures().bark, bumpScale: 0.045, roughness: 0.9 });
@@ -1847,8 +1907,18 @@ function makeWorldChunk(cx: number, cz: number) {
       obstacles.push({ x: mountain.position.x, z: mountain.position.z, radius: 4.8 * scale, kind: 'solid' });
       group.add(mountain);
     }
+    const treeCount = 3 + Math.floor(hash2(cx, cz, 1230) * 5);
+    for (let i = 0; i < treeCount; i++) {
+      const tree = makeForestTree();
+      tree.position.set(chunkRandom(cx, cz, i + 1240, -40, 40), 0, chunkRandom(cx, cz, i + 1260, -40, 40));
+      tree.rotation.y = chunkRandom(cx, cz, i + 1280, 0, Math.PI * 2);
+      const scale = chunkRandom(cx, cz, i + 1300, 0.68, 1.18);
+      tree.scale.setScalar(scale);
+      obstacles.push({ x: tree.position.x, z: tree.position.z, radius: 0.72 * scale, kind: 'solid' });
+      group.add(tree);
+    }
   } else if (terrainRoll > 0.38) {
-    const count = 11 + Math.floor(hash2(cx, cz, 4) * 18);
+    const count = 18 + Math.floor(hash2(cx, cz, 4) * 24);
     for (let i = 0; i < count; i++) {
       const tree = makeForestTree();
       tree.position.set(chunkRandom(cx, cz, i + 40, -40, 40), 0, chunkRandom(cx, cz, i + 90, -40, 40));
@@ -1889,6 +1959,21 @@ function makeWorldChunk(cx: number, cz: number) {
     }
   }
 
+  if (hash2(cx, cz, 1320) > 0.72) {
+    const cache = makeMedicalSupplyCache();
+    cache.position.set(chunkRandom(cx, cz, 1321, -34, 34), 0, chunkRandom(cx, cz, 1322, -34, 34));
+    cache.rotation.y = chunkRandom(cx, cz, 1323, 0, Math.PI * 2);
+    cache.scale.setScalar(chunkRandom(cx, cz, 1324, 0.85, 1.2));
+    group.add(cache);
+  }
+  if (hash2(cx, cz, 1330) > 0.78) {
+    const pistolCache = makeServicePistolCache();
+    pistolCache.position.set(chunkRandom(cx, cz, 1331, -34, 34), 0, chunkRandom(cx, cz, 1332, -34, 34));
+    pistolCache.rotation.y = chunkRandom(cx, cz, 1333, 0, Math.PI * 2);
+    pistolCache.scale.setScalar(chunkRandom(cx, cz, 1334, 0.9, 1.18));
+    group.add(pistolCache);
+  }
+
   const detailCount = 10 + Math.floor(hash2(cx, cz, 540) * 13);
   for (let i = 0; i < detailCount; i++) {
     const detail = makeDetailPatch(i + cx * 17 + cz * 31);
@@ -1916,7 +2001,7 @@ function makeWorldChunk(cx: number, cz: number) {
   }
 
   if (terrainRoll > 0.34 && terrainRoll < 0.72) {
-    const stumpCount = 1 + Math.floor(hash2(cx, cz, 700) * 3);
+    const stumpCount = 3 + Math.floor(hash2(cx, cz, 700) * 5);
     for (let i = 0; i < stumpCount; i++) {
       const stump = makeTreeStump();
       stump.position.set(chunkRandom(cx, cz, i + 720, -38, 38), 0, chunkRandom(cx, cz, i + 750, -38, 38));
@@ -2658,10 +2743,13 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       scene.add(tuft);
     }
 
-    for (let i = 0; i < 38; i++) {
+    for (let i = 0; i < 54; i++) {
       placeScenery(scene, makeRockCluster(), randomRange(-WORLD_HALF + 8, WORLD_HALF - 8), randomRange(FINISH_Z + 28, START_Z - 18), randomRange(0.7, 1.8));
     }
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < 18; i++) {
+      placeScenery(scene, makeForestTree(), randomRange(-WORLD_HALF + 12, WORLD_HALF - 12), randomRange(FINISH_Z + 42, START_Z - 28), randomRange(0.85, 1.55));
+    }
+    for (let i = 0; i < 30; i++) {
       placeScenery(scene, makeDryTree(), randomRange(-WORLD_HALF + 12, WORLD_HALF - 12), randomRange(FINISH_Z + 42, START_Z - 28), randomRange(0.75, 1.4));
     }
     for (let i = 0; i < 9; i++) {
@@ -2673,8 +2761,17 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     for (let i = 0; i < 44; i++) {
       placeScenery(scene, makeDetailPatch(i), randomRange(-WORLD_HALF + 10, WORLD_HALF - 10), randomRange(FINISH_Z + 28, START_Z - 12), randomRange(0.65, 1.45));
     }
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 20; i++) {
       placeScenery(scene, makeTreeStump(), randomRange(-WORLD_HALF + 18, WORLD_HALF - 18), randomRange(FINISH_Z + 48, START_Z - 34), randomRange(0.65, 1.3));
+    }
+    for (let i = 0; i < 7; i++) {
+      placeScenery(scene, makeCoveredCarWreck(), randomRange(-WORLD_HALF + 26, WORLD_HALF - 26), randomRange(FINISH_Z + 70, START_Z - 65), randomRange(0.78, 1.18));
+    }
+    for (let i = 0; i < 8; i++) {
+      placeScenery(scene, makeMedicalSupplyCache(), randomRange(-WORLD_HALF + 22, WORLD_HALF - 22), randomRange(FINISH_Z + 65, START_Z - 40), randomRange(0.8, 1.15));
+    }
+    for (let i = 0; i < 5; i++) {
+      placeScenery(scene, makeServicePistolCache(), randomRange(-WORLD_HALF + 28, WORLD_HALF - 28), randomRange(FINISH_Z + 85, START_Z - 70), randomRange(0.82, 1.05));
     }
 
     const physicsObstacles: PhysicsObstacle[] = [];
@@ -2879,7 +2976,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       Object.keys(OUTFIT_URLS).length +
       Object.keys(MEDIEVAL_PROP_URLS).length +
       Object.keys(MEDIEVAL_EXTRA_PROP_URLS).length +
-      WORLD_REAL_TEXTURE_FILES.length +
+      GAME_LOADING_TEXTURE_FILES.length +
       1;
     let assetLoadDone = 0;
     const markAssetReady = (label: string) => {
@@ -2894,9 +2991,9 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         }, 450);
       }
     };
-    for (const file of WORLD_REAL_TEXTURE_FILES) {
+    for (const file of GAME_LOADING_TEXTURE_FILES) {
       textureLoader.load(
-        assetPath(`textures/world-real/${file}`),
+        assetPath(file),
         () => markAssetReady(`Текстура загружена: ${file}`),
         undefined,
         () => markAssetReady(`Текстура пропущена: ${file}`),
