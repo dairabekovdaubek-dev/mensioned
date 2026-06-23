@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { Auth } from './components/Auth';
+import { Reviews } from './components/Reviews';
 import { QasqyrGame } from './game/QasqyrGame';
 import { useGameAssetPreload } from './lib/assetPreload';
 
@@ -72,6 +73,7 @@ export default function App() {
           onBack={() => supabase.auth.signOut()}
         />
       )}
+      {!playing && <Reviews />}
     </main>
   );
 }
