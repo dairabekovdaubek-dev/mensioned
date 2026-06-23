@@ -68,8 +68,8 @@ export function Auth({ onPlayAsGuest, onAuthStarted }: AuthProps) {
             </button>
             <h2 style={styles.authTitle}>Вход через Gmail</h2>
             <p style={styles.authText}>
-              Нажми кнопку ниже, зарегистрируйся через Google, и после входа игра сразу откроет
-              экран выбора режима.
+              Нажми кнопку ниже, зарегистрируйся через Google, и после входа ты вернешься
+              на экран игрока с кнопкой запуска.
             </p>
             <button type="button" onClick={signInWithGoogle} disabled={busy} style={styles.googleButton}>
               {busy ? 'Открываем Google...' : 'Продолжить с Gmail'}
