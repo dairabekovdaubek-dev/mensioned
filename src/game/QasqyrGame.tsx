@@ -33,6 +33,23 @@ type CharacterAnimationName = 'idle' | 'walk' | 'attack';
 type OutfitRole = 'player' | 'enemy' | 'npc';
 type OutfitKind = 'maleRanger' | 'femaleRanger' | 'malePeasant' | 'femalePeasant';
 type MedievalPropKind = 'wagon' | 'crate' | 'woodFence' | 'metalFence' | 'roundDoor' | 'roundRoof' | 'vine' | 'chimney';
+type MedievalExtraPropKind =
+  | 'wallPlaster'
+  | 'wallBrick'
+  | 'wallWindow'
+  | 'roofDormer'
+  | 'roofTower'
+  | 'roofWood'
+  | 'floorBrick'
+  | 'floorWood'
+  | 'stairs'
+  | 'doorFrame'
+  | 'shutter'
+  | 'brickPile'
+  | 'vine2'
+  | 'ornamentFence'
+  | 'border'
+  | 'support';
 
 type CharacterAnimator = {
   mixer: THREE.AnimationMixer;
@@ -212,6 +229,36 @@ const MEDIEVAL_PROP_URLS: Record<MedievalPropKind, string> = {
   vine: assetPath('models/medieval/Prop_Vine1.gltf'),
   chimney: assetPath('models/medieval/Prop_Chimney.gltf'),
 };
+const MEDIEVAL_EXTRA_PROP_URLS: Record<MedievalExtraPropKind, string> = {
+  wallPlaster: assetPath('models/medieval-village/glTF/Wall_Plaster_WoodGrid.gltf'),
+  wallBrick: assetPath('models/medieval-village/glTF/Wall_UnevenBrick_Straight.gltf'),
+  wallWindow: assetPath('models/medieval-village/glTF/Wall_Plaster_Window_Wide_Round.gltf'),
+  roofDormer: assetPath('models/medieval-village/glTF/Roof_Dormer_RoundTile.gltf'),
+  roofTower: assetPath('models/medieval-village/glTF/Roof_Tower_RoundTiles.gltf'),
+  roofWood: assetPath('models/medieval-village/glTF/Roof_Wooden_2x1.gltf'),
+  floorBrick: assetPath('models/medieval-village/glTF/Floor_UnevenBrick.gltf'),
+  floorWood: assetPath('models/medieval-village/glTF/Floor_WoodDark.gltf'),
+  stairs: assetPath('models/medieval-village/glTF/Stairs_Exterior_Straight.gltf'),
+  doorFrame: assetPath('models/medieval-village/glTF/DoorFrame_Round_Brick.gltf'),
+  shutter: assetPath('models/medieval-village/glTF/WindowShutters_Wide_Round_Open.gltf'),
+  brickPile: assetPath('models/medieval-village/glTF/Prop_Brick4.gltf'),
+  vine2: assetPath('models/medieval-village/glTF/Prop_Vine2.gltf'),
+  ornamentFence: assetPath('models/medieval-village/glTF/Prop_MetalFence_Ornament.gltf'),
+  border: assetPath('models/medieval-village/glTF/Prop_ExteriorBorder_Straight1.gltf'),
+  support: assetPath('models/medieval-village/glTF/Prop_Support.gltf'),
+};
+const WORLD_REAL_TEXTURE_FILES = [
+  'boulder_diff.jpg',
+  'covered_car_diff.jpg',
+  'fish_knife_diff.jpg',
+  'island_tree_bark_diff.jpg',
+  'island_tree_leaves_diff.png',
+  'medical_box_diff.jpg',
+  'rock_moss_diff.jpg',
+  'rocky_terrain_diff.jpg',
+  'service_pistol_diff.jpg',
+  'tree_stump_diff.jpg',
+];
 
 const DIFFICULTY: Record<Difficulty, {
   label: string;
@@ -2210,6 +2257,9 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
   const [caseOpening, setCaseOpening] = useState<CaseOpening | null>(null);
   const [progressLoaded, setProgressLoaded] = useState(!userId);
   const [savedGameState, setSavedGameState] = useState<SavedGameState | null>(null);
+  const [assetLoading, setAssetLoading] = useState(false);
+  const [assetLoadingProgress, setAssetLoadingProgress] = useState(0);
+  const [assetLoadingLabel, setAssetLoadingLabel] = useState('Готовим мир...');
   const [vision, setVision] = useState<VisionKind>('');
   const [ending, setEnding] = useState('');
   const [taunt, setTaunt] = useState('');
@@ -2505,6 +2555,9 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     if (phase !== 'playing') return;
     const mount = mountRef.current;
     if (!mount) return;
+    setAssetLoading(true);
+    setAssetLoadingProgress(1);
+    setAssetLoadingLabel('У вас лагает компьютер, подождите загрузку...');
     const balance = DIFFICULTY[difficultyRef.current];
 
     const scene = new THREE.Scene();
@@ -2820,16 +2873,45 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     player.add(playerBody, shirtFront, playerHead, hair, nose, leftEye, rightEye, mouth, hat, belt, pack, scarf, hloodAura, heldWeaponModel);
     scene.add(player);
     const gltfLoader = new GLTFLoader();
+    const textureLoader = new THREE.TextureLoader();
+    let stopped = false;
+    const assetLoadTotal =
+      Object.keys(OUTFIT_URLS).length +
+      Object.keys(MEDIEVAL_PROP_URLS).length +
+      Object.keys(MEDIEVAL_EXTRA_PROP_URLS).length +
+      WORLD_REAL_TEXTURE_FILES.length +
+      1;
+    let assetLoadDone = 0;
+    const markAssetReady = (label: string) => {
+      if (stopped) return;
+      assetLoadDone += 1;
+      const progress = Math.min(100, Math.round((assetLoadDone / assetLoadTotal) * 100));
+      setAssetLoadingProgress(progress);
+      setAssetLoadingLabel(label);
+      if (assetLoadDone >= assetLoadTotal) {
+        window.setTimeout(() => {
+          if (!stopped) setAssetLoading(false);
+        }, 450);
+      }
+    };
+    for (const file of WORLD_REAL_TEXTURE_FILES) {
+      textureLoader.load(
+        assetPath(`textures/world-real/${file}`),
+        () => markAssetReady(`Текстура загружена: ${file}`),
+        undefined,
+        () => markAssetReady(`Текстура пропущена: ${file}`),
+      );
+    }
     const assetMixers: THREE.AnimationMixer[] = [];
     const outfitTemplates: Partial<Record<OutfitKind, THREE.Group>> = {};
     const medievalPropTemplates: Partial<Record<MedievalPropKind, THREE.Group>> = {};
+    const medievalExtraPropTemplates: Partial<Record<MedievalExtraPropKind, THREE.Group>> = {};
     let outfitModel: THREE.Group | null = null;
     let animationClips: THREE.AnimationClip[] = [];
     let playerAnimator: CharacterAnimator | null = null;
     let companionMesh: THREE.Group | null = null;
     let companionAnimator: CharacterAnimator | undefined;
     let animationGuide: THREE.Group | null = null;
-    let stopped = false;
     const playerOutfitKind = PLAYER_OUTFIT_BY_DIFFICULTY[difficultyRef.current];
     const loadGltf = (url: string, onLoad: (gltf: GLTF) => void, onError: () => void, attempt = 0) => {
       gltfLoader.load(
@@ -3076,6 +3158,58 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         if (kind === 'chimney') addMedievalProp(kind, fake.x - 4, fake.z - 3, 1.25, fake.id * 0.25);
       }
     };
+    const placedMedievalExtraDecor = new Set<MedievalExtraPropKind>();
+    const addMedievalExtraProp = (kind: MedievalExtraPropKind, x: number, z: number, scale: number, rotation = 0) => {
+      const template = medievalExtraPropTemplates[kind];
+      if (!template) return;
+      const prop = makeAssetInstance(template);
+      prop.position.set(x, terrainHeightAt(x, z), z);
+      prop.rotation.y = rotation;
+      prop.scale.setScalar(scale);
+      scene.add(prop);
+    };
+    const placeMedievalExtraDecor = (kind: MedievalExtraPropKind) => {
+      if (placedMedievalExtraDecor.has(kind) || !medievalExtraPropTemplates[kind]) return;
+      placedMedievalExtraDecor.add(kind);
+
+      for (const npc of houseNpcsRef.current) {
+        const side = npc.x < 0 ? -1 : 1;
+        if (kind === 'wallPlaster') addMedievalExtraProp(kind, npc.x + side * 4.45, npc.z - 0.7, 1.05, Math.PI / 2);
+        if (kind === 'wallBrick' && npc.mood === 'evil') addMedievalExtraProp(kind, npc.x - side * 4.45, npc.z - 0.7, 1.05, Math.PI / 2);
+        if (kind === 'wallWindow') addMedievalExtraProp(kind, npc.x, npc.z - 4.15, 1.02, 0);
+        if (kind === 'roofDormer' && npc.id % 2 === 0) addMedievalExtraProp(kind, npc.x + side * 1.8, npc.z - 0.8, 0.92, side * 0.18);
+        if (kind === 'roofWood' && npc.id % 3 === 1) addMedievalExtraProp(kind, npc.x - side * 1.7, npc.z + 0.5, 0.9, Math.PI / 2);
+        if (kind === 'floorBrick') addMedievalExtraProp(kind, npc.x, npc.z - 5.35, 1.35, npc.x * 0.02);
+        if (kind === 'floorWood') addMedievalExtraProp(kind, npc.x + side * 3.2, npc.z + 4.7, 0.95, npc.id * 0.35);
+        if (kind === 'stairs') addMedievalExtraProp(kind, npc.x, npc.z - 4.75, 0.82, 0);
+        if (kind === 'doorFrame') addMedievalExtraProp(kind, npc.x, npc.z - 3.92, 1.03, 0);
+        if (kind === 'shutter') {
+          addMedievalExtraProp(kind, npc.x - 2.4, npc.z - 4.05, 0.75, 0);
+          addMedievalExtraProp(kind, npc.x + 2.4, npc.z - 4.05, 0.75, 0);
+        }
+        if (kind === 'vine2' && npc.mood !== 'evil') addMedievalExtraProp(kind, npc.x - side * 3.75, npc.z - 3.95, 1.28, -side * 0.2);
+        if (kind === 'support') {
+          addMedievalExtraProp(kind, npc.x - 3.4, npc.z - 4.2, 0.85, 0);
+          addMedievalExtraProp(kind, npc.x + 3.4, npc.z - 4.2, 0.85, 0);
+        }
+      }
+
+      for (const fake of fakeFortressesRef.current) {
+        if (kind === 'roofTower') addMedievalExtraProp(kind, fake.x, fake.z + 1.2, 1.45, fake.id * 0.25);
+        if (kind === 'ornamentFence') {
+          addMedievalExtraProp(kind, fake.x - 10.5, fake.z + 9.2, 1.6, Math.PI / 2);
+          addMedievalExtraProp(kind, fake.x + 10.5, fake.z + 9.2, 1.6, Math.PI / 2);
+        }
+        if (kind === 'border') {
+          addMedievalExtraProp(kind, fake.x - 5.5, fake.z - 6.5, 1.55, 0);
+          addMedievalExtraProp(kind, fake.x + 5.5, fake.z - 6.5, 1.55, 0);
+        }
+        if (kind === 'brickPile') {
+          addMedievalExtraProp(kind, fake.x - 6.4, fake.z + 4.4, 1.2, fake.id * 0.5);
+          addMedievalExtraProp(kind, fake.x + 6.1, fake.z - 3.8, 0.95, fake.id * 0.7);
+        }
+      }
+    };
 
     for (const [kind, url] of Object.entries(OUTFIT_URLS) as [OutfitKind, string][]) {
       loadGltf(
@@ -3093,10 +3227,12 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
           replaceFallbackEnemies();
           replaceFallbackNpcs();
           replaceCompanionFallback();
+          markAssetReady(`Персонаж загружен: ${kind}`);
         },
         () => {
           hintRef.current = 'Не удалось загрузить один из fantasy outfit ассетов. Игра использует fallback-модель.';
           setHud((h) => ({ ...h, hint: hintRef.current }));
+          markAssetReady(`Персонаж пропущен: ${kind}`);
         },
       );
     }
@@ -3110,10 +3246,31 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
           enableAssetShadows(template);
           medievalPropTemplates[kind] = template;
           placeMedievalDecor(kind);
+          markAssetReady(`Декор загружен: ${kind}`);
         },
         () => {
           hintRef.current = 'Не удалось загрузить часть Medieval Village декора.';
           setHud((h) => ({ ...h, hint: hintRef.current }));
+          markAssetReady(`Декор пропущен: ${kind}`);
+        },
+      );
+    }
+
+    for (const [kind, url] of Object.entries(MEDIEVAL_EXTRA_PROP_URLS) as [MedievalExtraPropKind, string][]) {
+      loadGltf(
+        url,
+        (gltf) => {
+          if (stopped) return;
+          const template = gltf.scene;
+          enableAssetShadows(template);
+          medievalExtraPropTemplates[kind] = template;
+          placeMedievalExtraDecor(kind);
+          markAssetReady(`MegaKit модель загружена: ${kind}`);
+        },
+        () => {
+          hintRef.current = 'Часть новых MegaKit-моделей не загрузилась, игра продолжит с доступным декором.';
+          setHud((h) => ({ ...h, hint: hintRef.current }));
+          markAssetReady(`MegaKit модель пропущена: ${kind}`);
         },
       );
     }
@@ -3134,6 +3291,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         enableAssetShadows(animationGuide);
         scene.add(animationGuide);
         animationGuide.visible = false;
+        markAssetReady('Анимации персонажей загружены');
 
         const mixer = new THREE.AnimationMixer(animationGuide);
         const clip =
@@ -3150,6 +3308,12 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         setHud((h) => ({ ...h, hint: hintRef.current }));
       },
     );
+    window.setTimeout(() => {
+      if (stopped) return;
+      setAssetLoadingProgress(100);
+      setAssetLoadingLabel('Мир готов, можно играть.');
+      setAssetLoading(false);
+    }, 14000);
     const playerShadow = new THREE.Mesh(
       new THREE.CircleGeometry(1.25, 28),
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false }),
@@ -4272,6 +4436,18 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       </style>
       {phase === 'playing' && <div ref={mountRef} style={styles.mount} />}
       {phase === 'won' && <ZombieCongratsPhoto score={hud.score} />}
+      {phase === 'playing' && assetLoading && (
+        <div style={styles.loadingOverlay}>
+          <div style={styles.loadingPanel}>
+            <b>У вас лагает компьютер, подождите загрузку</b>
+            <span>{assetLoadingLabel}</span>
+            <div style={styles.loadingTrack}>
+              <span style={{ ...styles.loadingFill, width: `${assetLoadingProgress}%` }} />
+            </div>
+            <small>{assetLoadingProgress}%</small>
+          </div>
+        </div>
+      )}
 
       <button type="button" onClick={exit} style={styles.exit}>Выйти</button>
 
@@ -4639,6 +4815,41 @@ const styles: Record<string, CSSProperties> = {
     fontFamily: 'Inter, system-ui, sans-serif',
   },
   mount: { position: 'absolute', inset: 0 },
+  loadingOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 80,
+    display: 'grid',
+    placeItems: 'center',
+    background: 'rgba(5,8,7,.76)',
+    backdropFilter: 'blur(6px)',
+  },
+  loadingPanel: {
+    width: 'min(440px, calc(100vw - 34px))',
+    display: 'grid',
+    gap: 12,
+    padding: 18,
+    border: '1px solid rgba(255,255,255,.18)',
+    borderRadius: 8,
+    background: 'rgba(10,14,12,.92)',
+    boxShadow: '0 18px 44px rgba(0,0,0,.38)',
+    textAlign: 'center',
+    color: '#f6f2e9',
+  },
+  loadingTrack: {
+    width: '100%',
+    height: 10,
+    overflow: 'hidden',
+    borderRadius: 999,
+    background: 'rgba(255,255,255,.14)',
+  },
+  loadingFill: {
+    display: 'block',
+    height: '100%',
+    borderRadius: 999,
+    background: 'linear-gradient(90deg, #70d6ff, #ffd37b)',
+    transition: 'width .24s ease',
+  },
   exit: {
     position: 'absolute',
     top: 16,
