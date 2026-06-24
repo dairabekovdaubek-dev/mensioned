@@ -93,6 +93,62 @@ export function PresentationPage() {
     },
     {
       id: 4,
+      label: 'Lite build',
+      content: (
+        <section style={styles.performanceSlide}>
+          <div style={styles.performanceCopy}>
+            <p style={styles.kicker}>Performance</p>
+            <h2 style={styles.title}>Игра тяжелая не просто так</h2>
+            <p style={styles.performanceLead}>
+              В полной версии QASQYR 3D используются 3D-модели, большие текстуры, свет, тени, вода, трава, дома и персонажи. Не каждый ноутбук спокойно тянет такую сцену, а телефон тем более.
+            </p>
+            <p style={styles.performanceNote}>
+              Поэтому мобильная версия сделана легче по графике: меньше тяжелых эффектов, проще окружение, быстрее загрузка и стабильнее управление с экрана.
+            </p>
+          </div>
+          <div style={styles.performancePanel}>
+            <div style={styles.deviceRow}>
+              <div style={styles.laptopVisual}>
+                <div style={styles.laptopScreen}>
+                  <span style={styles.sunDot} />
+                  <span style={styles.miniMountainA} />
+                  <span style={styles.miniMountainB} />
+                  <span style={styles.miniTreeA} />
+                  <span style={styles.miniTreeB} />
+                  <span style={styles.miniHouse} />
+                </div>
+                <div style={styles.laptopBase} />
+              </div>
+              <div style={styles.performanceStats}>
+                <b>ПК-версия</b>
+                <span>Максимальная графика</span>
+                <span>FBX-модели и текстуры</span>
+                <span>Тяжелая сцена</span>
+              </div>
+            </div>
+            <div style={styles.loadMeter}>
+              <span style={styles.loadMeterFill} />
+            </div>
+            <div style={styles.deviceRow}>
+              <div style={styles.phoneVisual}>
+                <div style={styles.phoneScreen}>
+                  <span style={styles.phonePath} />
+                  <span style={styles.phoneHero} />
+                </div>
+              </div>
+              <div style={styles.performanceStats}>
+                <b>Телефон</b>
+                <span>Легкая графика</span>
+                <span>Быстрее запуск</span>
+                <span>Горизонтальное управление</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      ),
+    },
+    {
+      id: 5,
       label: 'Video-demo',
       content: (
         <section style={styles.demoSlide}>
@@ -131,7 +187,7 @@ export function PresentationPage() {
       ),
     },
     {
-      id: 5,
+      id: 6,
       label: 'QR',
       content: (
         <section style={styles.qrSlide}>
@@ -171,7 +227,7 @@ export function PresentationPage() {
         </div>
       </nav>
       <article style={styles.deck}>
-        <div style={styles.slideMeta}>Slide {current.id} / 5 · {current.label}</div>
+        <div style={styles.slideMeta}>Slide {current.id} / {slides.length} · {current.label}</div>
         {current.content}
       </article>
       <footer style={styles.footer}>
@@ -465,6 +521,175 @@ const styles: Record<string, CSSProperties> = {
     alignItems: 'center',
     gap: 28,
     minHeight: '60vh',
+  },
+  performanceSlide: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, .95fr) minmax(360px, 1.05fr)',
+    alignItems: 'center',
+    gap: 32,
+    minHeight: '60vh',
+  },
+  performanceCopy: {
+    display: 'grid',
+    gap: 18,
+  },
+  performanceLead: {
+    margin: 0,
+    color: '#f8f4ea',
+    fontSize: 'clamp(21px, 2.6vw, 34px)',
+    lineHeight: 1.22,
+    fontWeight: 800,
+  },
+  performanceNote: {
+    margin: 0,
+    maxWidth: 760,
+    color: '#cfc7b7',
+    fontSize: 20,
+    lineHeight: 1.45,
+  },
+  performancePanel: {
+    display: 'grid',
+    gap: 18,
+    padding: 22,
+    borderRadius: 8,
+    border: '1px solid rgba(255,255,255,.16)',
+    background: 'linear-gradient(145deg, rgba(14,22,20,.96), rgba(28,20,12,.92))',
+    boxShadow: '0 26px 70px rgba(0,0,0,.34)',
+  },
+  deviceRow: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(160px, 220px) minmax(0, 1fr)',
+    alignItems: 'center',
+    gap: 18,
+  },
+  laptopVisual: {
+    display: 'grid',
+    gap: 6,
+  },
+  laptopScreen: {
+    position: 'relative',
+    minHeight: 122,
+    borderRadius: 8,
+    overflow: 'hidden',
+    border: '1px solid rgba(255,255,255,.2)',
+    background: 'linear-gradient(180deg, #f0b65a 0%, #355c48 46%, #13201a 100%)',
+  },
+  laptopBase: {
+    height: 12,
+    borderRadius: 8,
+    background: 'linear-gradient(90deg, #403831, #b9a47b 50%, #403831)',
+  },
+  sunDot: {
+    position: 'absolute',
+    right: 20,
+    top: 14,
+    width: 20,
+    height: 20,
+    borderRadius: '50%',
+    background: '#ffd37b',
+    boxShadow: '0 0 28px rgba(255,211,123,.72)',
+  },
+  miniMountainA: {
+    position: 'absolute',
+    left: 0,
+    bottom: 34,
+    width: '58%',
+    height: 48,
+    background: '#243f3a',
+    clipPath: 'polygon(0 100%, 28% 20%, 45% 76%, 68% 12%, 100% 100%)',
+  },
+  miniMountainB: {
+    position: 'absolute',
+    right: 0,
+    bottom: 32,
+    width: '48%',
+    height: 40,
+    background: '#6f5c3b',
+    clipPath: 'polygon(0 100%, 35% 26%, 58% 70%, 82% 18%, 100% 100%)',
+  },
+  miniTreeA: {
+    position: 'absolute',
+    left: 42,
+    bottom: 22,
+    width: 22,
+    height: 48,
+    background: '#0c2117',
+    clipPath: 'polygon(50% 0, 86% 42%, 66% 42%, 96% 76%, 60% 76%, 60% 100%, 40% 100%, 40% 76%, 4% 76%, 34% 42%, 14% 42%)',
+  },
+  miniTreeB: {
+    position: 'absolute',
+    right: 54,
+    bottom: 22,
+    width: 24,
+    height: 50,
+    background: '#2d1645',
+    borderRadius: '50% 50% 12px 12px',
+  },
+  miniHouse: {
+    position: 'absolute',
+    right: 20,
+    bottom: 20,
+    width: 42,
+    height: 34,
+    background: 'linear-gradient(180deg, #7b4a2e 0 38%, #c5a274 38%)',
+    clipPath: 'polygon(50% 0, 100% 38%, 88% 38%, 88% 100%, 12% 100%, 12% 38%, 0 38%)',
+  },
+  performanceStats: {
+    display: 'grid',
+    gap: 7,
+    color: '#ded7c8',
+    fontSize: 16,
+    lineHeight: 1.2,
+  },
+  loadMeter: {
+    height: 16,
+    borderRadius: 999,
+    overflow: 'hidden',
+    background: 'rgba(255,255,255,.12)',
+    border: '1px solid rgba(255,255,255,.14)',
+  },
+  loadMeterFill: {
+    display: 'block',
+    width: '78%',
+    height: '100%',
+    background: 'linear-gradient(90deg, #70d6ff, #ffd37b, #ff7a45)',
+  },
+  phoneVisual: {
+    width: 104,
+    height: 164,
+    justifySelf: 'center',
+    padding: 8,
+    borderRadius: 24,
+    border: '1px solid rgba(255,255,255,.22)',
+    background: '#070b0a',
+    boxShadow: '0 18px 40px rgba(0,0,0,.32)',
+  },
+  phoneScreen: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    borderRadius: 18,
+    overflow: 'hidden',
+    background: 'linear-gradient(180deg, #33554c, #172018)',
+  },
+  phonePath: {
+    position: 'absolute',
+    left: '35%',
+    bottom: -8,
+    width: '42%',
+    height: '82%',
+    background: '#8f6a32',
+    transform: 'skewX(-12deg)',
+  },
+  phoneHero: {
+    position: 'absolute',
+    left: '42%',
+    bottom: 28,
+    width: 14,
+    height: 28,
+    borderRadius: 10,
+    background: '#70d6ff',
+    boxShadow: '0 0 18px rgba(112,214,255,.45)',
   },
   qrSlide: {
     display: 'grid',
