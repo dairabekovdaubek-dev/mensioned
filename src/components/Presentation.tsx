@@ -7,10 +7,11 @@ type Slide = {
 };
 
 const APP_NAME = 'QASQYR 3D';
+const MOBILE_GAME_URL = 'https://mensioned.vercel.app/mobile';
 
 export function PresentationPage() {
   const [activeSlide, setActiveSlide] = useState(0);
-  const mobileUrl = useMemo(() => `${window.location.origin}/mobile`, []);
+  const mobileUrl = useMemo(() => MOBILE_GAME_URL, []);
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=360x360&margin=16&data=${encodeURIComponent(mobileUrl)}`;
 
   const slides: Slide[] = [
