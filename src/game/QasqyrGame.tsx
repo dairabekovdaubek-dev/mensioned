@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import * as THREE from 'three';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { supabase } from '../lib/supabase';
@@ -234,7 +235,7 @@ const DIALOG_REWARD = {
 const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`;
 const USE_CHARACTER_RUNTIME_ASSETS = true;
 const USE_WORLD_TEXTURE_ASSETS = true;
-const USE_WORLD_RUNTIME_ASSETS = false;
+const USE_WORLD_RUNTIME_ASSETS = true;
 const COMPANION_HOUSE: HouseNpc = {
   id: 99,
   name: 'Саят',
@@ -261,32 +262,32 @@ const PLAYER_OUTFIT_BY_DIFFICULTY: Record<Difficulty, OutfitKind> = {
 };
 const ANIMATION_LIBRARY_URL = assetPath('models/animations/ual2-standard.glb');
 const MEDIEVAL_PROP_URLS: Record<MedievalPropKind, string> = {
-  wagon: assetPath('models/medieval/Prop_Wagon.gltf'),
-  crate: assetPath('models/medieval/Prop_Crate.gltf'),
-  woodFence: assetPath('models/medieval/Prop_WoodenFence_Single.gltf'),
-  metalFence: assetPath('models/medieval/Prop_MetalFence_Simple.gltf'),
-  roundDoor: assetPath('models/medieval/Door_1_Round.gltf'),
-  roundRoof: assetPath('models/medieval/Roof_2x4_RoundTile.gltf'),
-  vine: assetPath('models/medieval/Prop_Vine1.gltf'),
-  chimney: assetPath('models/medieval/Prop_Chimney.gltf'),
+  wagon: assetPath('models/medieval-village/fbx/Prop_Wagon.fbx'),
+  crate: assetPath('models/medieval-village/fbx/Prop_Crate.fbx'),
+  woodFence: assetPath('models/medieval-village/fbx/Prop_WoodenFence_Single.fbx'),
+  metalFence: assetPath('models/medieval-village/fbx/Prop_MetalFence_Simple.fbx'),
+  roundDoor: assetPath('models/medieval-village/fbx/Door_1_Round.fbx'),
+  roundRoof: assetPath('models/medieval-village/fbx/Roof_2x4_RoundTile.fbx'),
+  vine: assetPath('models/medieval-village/fbx/Prop_Vine2.fbx'),
+  chimney: assetPath('models/medieval-village/fbx/Prop_Chimney.fbx'),
 };
 const MEDIEVAL_EXTRA_PROP_URLS: Record<MedievalExtraPropKind, string> = {
-  wallPlaster: assetPath('models/medieval-village/glTF/Wall_Plaster_WoodGrid.gltf'),
-  wallBrick: assetPath('models/medieval-village/glTF/Wall_UnevenBrick_Straight.gltf'),
-  wallWindow: assetPath('models/medieval-village/glTF/Wall_Plaster_Window_Wide_Round.gltf'),
-  roofDormer: assetPath('models/medieval-village/glTF/Roof_Dormer_RoundTile.gltf'),
-  roofTower: assetPath('models/medieval-village/glTF/Roof_Tower_RoundTiles.gltf'),
-  roofWood: assetPath('models/medieval-village/glTF/Roof_Wooden_2x1.gltf'),
-  floorBrick: assetPath('models/medieval-village/glTF/Floor_UnevenBrick.gltf'),
-  floorWood: assetPath('models/medieval-village/glTF/Floor_WoodDark.gltf'),
-  stairs: assetPath('models/medieval-village/glTF/Stairs_Exterior_Straight.gltf'),
-  doorFrame: assetPath('models/medieval-village/glTF/DoorFrame_Round_Brick.gltf'),
-  shutter: assetPath('models/medieval-village/glTF/WindowShutters_Wide_Round_Open.gltf'),
-  brickPile: assetPath('models/medieval-village/glTF/Prop_Brick4.gltf'),
-  vine2: assetPath('models/medieval-village/glTF/Prop_Vine2.gltf'),
-  ornamentFence: assetPath('models/medieval-village/glTF/Prop_MetalFence_Ornament.gltf'),
-  border: assetPath('models/medieval-village/glTF/Prop_ExteriorBorder_Straight1.gltf'),
-  support: assetPath('models/medieval-village/glTF/Prop_Support.gltf'),
+  wallPlaster: assetPath('models/medieval-village/fbx/Wall_Plaster_WoodGrid.fbx'),
+  wallBrick: assetPath('models/medieval-village/fbx/Wall_UnevenBrick_Straight.fbx'),
+  wallWindow: assetPath('models/medieval-village/fbx/Wall_Plaster_Window_Wide_Round.fbx'),
+  roofDormer: assetPath('models/medieval-village/fbx/Roof_Dormer_RoundTile.fbx'),
+  roofTower: assetPath('models/medieval-village/fbx/Roof_Tower_RoundTiles.fbx'),
+  roofWood: assetPath('models/medieval-village/fbx/Roof_Wooden_2x1.fbx'),
+  floorBrick: assetPath('models/medieval-village/fbx/Floor_UnevenBrick.fbx'),
+  floorWood: assetPath('models/medieval-village/fbx/Floor_WoodDark.fbx'),
+  stairs: assetPath('models/medieval-village/fbx/Stairs_Exterior_Straight.fbx'),
+  doorFrame: assetPath('models/medieval-village/fbx/DoorFrame_Round_Brick.fbx'),
+  shutter: assetPath('models/medieval-village/fbx/WindowShutters_Wide_Round_Open.fbx'),
+  brickPile: assetPath('models/medieval-village/fbx/Prop_Brick4.fbx'),
+  vine2: assetPath('models/medieval-village/fbx/Prop_Vine2.fbx'),
+  ornamentFence: assetPath('models/medieval-village/fbx/Prop_MetalFence_Ornament.fbx'),
+  border: assetPath('models/medieval-village/fbx/Prop_ExteriorBorder_Straight1.fbx'),
+  support: assetPath('models/medieval-village/fbx/Prop_Support.fbx'),
 };
 const WORLD_REAL_TEXTURE_FILES = [
   'boulder_diff.jpg',
@@ -306,19 +307,11 @@ const GAME_LOADING_TEXTURE_FILES = [
   'models/outfits/fantasy/T_Ranger_BaseColor.png',
   'models/outfits/fantasy/T_Regular_Female_Dark_BaseColor.png',
   'models/outfits/fantasy/T_Regular_Male_Dark_BaseColor.png',
-  'models/medieval/T_Brick_BaseColor.png',
-  'models/medieval/T_RockTrim_BaseColor.png',
-  'models/medieval/T_RoundTiles_BaseColor.png',
-  'models/medieval/T_VineLeaf_png.png',
-  'models/medieval/T_WoodTrim_BaseColor.png',
-  'models/medieval-village/glTF/T_Brick_BaseColor.png',
-  'models/medieval-village/glTF/T_Noise_Terrain.png',
-  'models/medieval-village/glTF/T_Plaster_BaseColor.png',
-  'models/medieval-village/glTF/T_RockTrim_BaseColor.png',
-  'models/medieval-village/glTF/T_RoundTiles_BaseColor.png',
-  'models/medieval-village/glTF/T_UnevenBrick_BaseColor.png',
-  'models/medieval-village/glTF/T_VineLeaf.png',
-  'models/medieval-village/glTF/T_WoodTrim_BaseColor.png',
+  'textures/world-real/medieval_plaster.png',
+  'textures/world-real/medieval_rock_trim.png',
+  'textures/world-real/medieval_roof_tiles.png',
+  'textures/world-real/medieval_uneven_brick.png',
+  'textures/world-real/medieval_wood_trim.png',
 ];
 
 const DIFFICULTY: Record<Difficulty, {
@@ -644,6 +637,28 @@ function fitAssetHeight(asset: THREE.Object3D, targetHeight: number) {
   asset.scale.multiplyScalar(targetHeight / height);
 }
 
+function fitAssetMaxSpan(asset: THREE.Object3D, targetSpan: number) {
+  const bounds = new THREE.Box3().setFromObject(asset);
+  const size = bounds.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z);
+  if (span <= 0) return;
+  asset.scale.multiplyScalar(targetSpan / span);
+}
+
+function centerAssetOnGround(asset: THREE.Object3D) {
+  asset.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(asset);
+  const centerX = (bounds.min.x + bounds.max.x) / 2;
+  const centerZ = (bounds.min.z + bounds.max.z) / 2;
+  const liftY = bounds.min.y;
+  for (const child of asset.children) {
+    child.position.x -= centerX;
+    child.position.y -= liftY;
+    child.position.z -= centerZ;
+  }
+  asset.updateMatrixWorld(true);
+}
+
 function cloneMaterial(material: THREE.Material | THREE.Material[]) {
   return Array.isArray(material) ? material.map((entry) => entry.clone()) : material.clone();
 }
@@ -823,6 +838,91 @@ function makeAssetInstance(template: THREE.Group) {
     }
   });
   return asset;
+}
+
+function medievalMaterialForName(name: string) {
+  const key = name.toLowerCase();
+  const textures = worldTextures();
+  if (key.includes('roof') || key.includes('tile')) {
+    return new THREE.MeshStandardMaterial({ color: 0xc27a46, map: textures.roof, roughness: 0.82, metalness: 0 });
+  }
+  if (key.includes('wood') || key.includes('door') || key.includes('shutter') || key.includes('support') || key.includes('wagon') || key.includes('crate')) {
+    return new THREE.MeshStandardMaterial({ color: 0x8a6040, map: textures.stump, roughness: 0.86, metalness: 0 });
+  }
+  if (key.includes('brick') || key.includes('stone') || key.includes('rock') || key.includes('floor') || key.includes('stairs')) {
+    return new THREE.MeshStandardMaterial({ color: 0x8b8171, map: textures.rockyTerrain, roughness: 0.93, metalness: 0 });
+  }
+  if (key.includes('vine')) {
+    return new THREE.MeshStandardMaterial({ color: 0x5f8f52, map: textures.islandLeaves, roughness: 0.82, metalness: 0 });
+  }
+  if (key.includes('metal') || key.includes('fence')) {
+    return new THREE.MeshStandardMaterial({ color: 0x3f4340, map: textures.rockMoss, roughness: 0.66, metalness: 0.42 });
+  }
+  return new THREE.MeshStandardMaterial({ color: 0xa88e6f, map: textures.wall, roughness: 0.9, metalness: 0 });
+}
+
+function prepareMedievalTemplate(template: THREE.Group, kind: string) {
+  template.traverse((part) => {
+    if (!(part instanceof THREE.Mesh)) return;
+    part.castShadow = true;
+    part.receiveShadow = true;
+    part.frustumCulled = false;
+    const current = Array.isArray(part.material) ? part.material[0] : part.material;
+    if (current && 'map' in current && current.map) {
+      part.material = cloneMaterial(part.material);
+      const materials = Array.isArray(part.material) ? part.material : [part.material];
+      for (const material of materials) {
+        if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhongMaterial) {
+          if (material.map) {
+            material.map.colorSpace = THREE.SRGBColorSpace;
+            material.map.anisotropy = 8;
+          }
+          material.transparent = false;
+          material.depthWrite = true;
+        }
+      }
+    } else {
+      part.material = medievalMaterialForName(`${kind} ${part.name}`);
+    }
+  });
+  const key = kind.toLowerCase();
+  if (key.includes('floor')) {
+    fitAssetMaxSpan(template, 5.2);
+    centerAssetOnGround(template);
+    enableAssetShadows(template);
+    template.userData.medievalKind = kind;
+    return;
+  }
+  if (key.includes('border')) {
+    fitAssetMaxSpan(template, 3.2);
+    centerAssetOnGround(template);
+    enableAssetShadows(template);
+    template.userData.medievalKind = kind;
+    return;
+  }
+  if (key.includes('brick')) {
+    fitAssetMaxSpan(template, 0.9);
+    centerAssetOnGround(template);
+    enableAssetShadows(template);
+    template.userData.medievalKind = kind;
+    return;
+  }
+  const targetHeight =
+    key.includes('wall') ? 3.4 :
+      key.includes('roof') ? 2.2 :
+        key.includes('door') ? 2.35 :
+          key.includes('window') || key.includes('shutter') ? 1.35 :
+            key.includes('stairs') ? 0.9 :
+              key.includes('floor') ? 0.16 :
+                key.includes('wagon') ? 2.25 :
+                  key.includes('crate') ? 0.85 :
+                    key.includes('fence') ? 1.55 :
+                      key.includes('chimney') || key.includes('support') ? 1.75 :
+                        key.includes('vine') ? 1.8 : 2.2;
+  fitAssetHeight(template, targetHeight);
+  centerAssetOnGround(template);
+  enableAssetShadows(template);
+  template.userData.medievalKind = kind;
 }
 
 function makeRuntimeOutfit(kind: OutfitKind, role: OutfitRole, mood: NpcMood = 'neutral') {
@@ -3119,6 +3219,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
 
     const physicsObstacles: PhysicsObstacle[] = [];
     const npcFigures: { npc: HouseNpc; mesh: THREE.Group; animator?: CharacterAnimator }[] = [];
+    const placedHouses: { npc: HouseNpc; mesh: THREE.Group; replaced: boolean }[] = [];
     const addObstacle = (obstacle: PhysicsObstacle) => physicsObstacles.push(obstacle);
 
     scene.add(makeFortress(0, FINISH_Z - 10, false));
@@ -3132,6 +3233,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       house.position.set(npc.x, 0, npc.z);
       house.rotation.y = npc.x < 0 ? -0.28 : 0.28;
       scene.add(house);
+      placedHouses.push({ npc, mesh: house, replaced: false });
       addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 5.2, kind: 'solid' });
       const windowGlow = new THREE.PointLight(npc.mood === 'evil' ? 0xb84230 : 0xffc978, npc.mood === 'evil' ? 1.15 : 0.9, 18, 2.1);
       windowGlow.position.set(npc.x, 2.55, npc.z - 4.6);
@@ -3146,6 +3248,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     companionHouse.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z);
     companionHouse.rotation.y = 0.18;
     scene.add(companionHouse);
+    placedHouses.push({ npc: COMPANION_HOUSE, mesh: companionHouse, replaced: false });
     addObstacle({ key: 'companion-house', x: COMPANION_HOUSE.x, z: COMPANION_HOUSE.z, radius: 5.2, kind: 'solid' });
     const companionDoorGlow = new THREE.PointLight(0x8cffb8, 1.25, 20, 2);
     companionDoorGlow.position.set(COMPANION_HOUSE.x, 2.6, COMPANION_HOUSE.z - 4.6);
@@ -3320,6 +3423,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     }
     scene.add(player);
     const gltfLoader = new GLTFLoader();
+    const fbxLoader = new FBXLoader();
     const textureLoader = new THREE.TextureLoader();
     let stopped = false;
     const assetLoadTotal = Math.max(1,
@@ -3376,6 +3480,22 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
           if (stopped) return;
           if (attempt < 2) {
             window.setTimeout(() => loadGltf(url, onLoad, onError, attempt + 1, enabled), 450 * (attempt + 1));
+            return;
+          }
+          onError();
+        },
+      );
+    };
+    const loadFbx = (url: string, onLoad: (fbx: THREE.Group) => void, onError: () => void, attempt = 0, enabled = USE_WORLD_RUNTIME_ASSETS) => {
+      if (!enabled) return;
+      fbxLoader.load(
+        url,
+        onLoad,
+        undefined,
+        () => {
+          if (stopped) return;
+          if (attempt < 2) {
+            window.setTimeout(() => loadFbx(url, onLoad, onError, attempt + 1, enabled), 450 * (attempt + 1));
             return;
           }
           onError();
@@ -3582,6 +3702,70 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       }
     };
     const placedMedievalDecor = new Set<MedievalPropKind>();
+    const addMedievalModule = (
+      parent: THREE.Group,
+      template: THREE.Group | undefined,
+      x: number,
+      y: number,
+      z: number,
+      scale = 1,
+      rotationY = 0,
+    ) => {
+      if (!template) return;
+      const module = makeAssetInstance(template);
+      module.position.set(x, y, z);
+      module.rotation.y = rotationY;
+      module.scale.multiplyScalar(scale);
+      parent.add(module);
+    };
+    const makeMedievalKitHouse = (npc: HouseNpc) => {
+      const group = new THREE.Group();
+      const sideTurn = npc.x < 0 ? -0.28 : 0.28;
+      const wall = npc.mood === 'evil' ? medievalExtraPropTemplates.wallBrick : medievalExtraPropTemplates.wallPlaster;
+      const roof = npc.id % 3 === 1 ? medievalExtraPropTemplates.roofWood : medievalPropTemplates.roundRoof;
+      const frontWindow = medievalExtraPropTemplates.wallWindow;
+      if (!wall || !frontWindow || !roof || !medievalPropTemplates.roundDoor) return null;
+
+      addMedievalModule(group, wall, -2.4, 0, -3.45, 1.0, 0);
+      addMedievalModule(group, frontWindow, 2.3, 0, -3.45, 1.0, 0);
+      addMedievalModule(group, wall, -4.05, 0, 0, 1.0, Math.PI / 2);
+      addMedievalModule(group, wall, 4.05, 0, 0, 1.0, Math.PI / 2);
+      addMedievalModule(group, wall, -2.1, 0, 3.45, 1.0, Math.PI);
+      addMedievalModule(group, wall, 2.1, 0, 3.45, 1.0, Math.PI);
+
+      addMedievalModule(group, medievalPropTemplates.roundDoor, 0, 0, -3.7, 1.05, 0);
+      addMedievalModule(group, medievalExtraPropTemplates.doorFrame, 0, 0, -3.74, 1.02, 0);
+      addMedievalModule(group, medievalExtraPropTemplates.shutter, -2.7, 1.05, -3.78, 0.72, 0);
+      addMedievalModule(group, medievalExtraPropTemplates.shutter, 2.7, 1.05, -3.78, 0.72, 0);
+
+      addMedievalModule(group, roof, 0, 3.75, 0, 2.1, Math.PI / 2);
+      if (npc.id % 2 === 0) addMedievalModule(group, medievalExtraPropTemplates.roofDormer, 0, 4.35, -1.55, 0.9, 0);
+      addMedievalModule(group, medievalPropTemplates.chimney, npc.x < 0 ? -2.2 : 2.2, 4.85, 0.7, 1.0, 0);
+      addMedievalModule(group, medievalExtraPropTemplates.stairs, 0, 0, -4.8, 0.95, 0);
+      addMedievalModule(group, medievalExtraPropTemplates.support, -3.6, 0, -3.95, 0.9, 0);
+      addMedievalModule(group, medievalExtraPropTemplates.support, 3.6, 0, -3.95, 0.9, 0);
+      if (npc.mood !== 'evil') {
+        addMedievalModule(group, medievalPropTemplates.vine, -3.95, 1.25, -3.85, 1.2, -0.2);
+        addMedievalModule(group, medievalExtraPropTemplates.vine2, 3.95, 1.15, -3.85, 1.1, 0.2);
+      }
+
+      group.position.set(npc.x, terrainHeightAt(npc.x, npc.z), npc.z);
+      group.rotation.y = sideTurn;
+      group.scale.setScalar(0.46);
+      group.name = `FBX Medieval House ${npc.id}`;
+      return group;
+    };
+    const replaceProceduralHousesWithFbx = () => {
+      for (const entry of placedHouses) {
+        if (entry.replaced) continue;
+        const replacement = makeMedievalKitHouse(entry.npc);
+        if (!replacement) return;
+        scene.add(replacement);
+        scene.remove(entry.mesh);
+        entry.mesh = replacement;
+        entry.replaced = true;
+      }
+    };
     const addMedievalProp = (kind: MedievalPropKind, x: number, z: number, scale: number, rotation = 0) => {
       const template = medievalPropTemplates[kind];
       if (!template) return;
@@ -3606,10 +3790,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
           addMedievalProp(kind, npc.x - 4.2, npc.z + 4.9, 1.2, Math.PI / 2);
           addMedievalProp(kind, npc.x + 4.2, npc.z + 4.9, 1.2, Math.PI / 2);
         }
-        if (kind === 'roundDoor') addMedievalProp(kind, npc.x, npc.z - 3.82, 1.1, npc.x < 0 ? -0.28 : 0.28);
-        if (kind === 'roundRoof' && npc.id % 2 === 1) addMedievalProp(kind, npc.x, npc.z, 1.15, Math.PI / 2 + (npc.x < 0 ? -0.28 : 0.28));
         if (kind === 'vine' && npc.mood !== 'evil') addMedievalProp(kind, npc.x + side * 3.8, npc.z - 3.95, 1.5, side * 0.2);
-        if (kind === 'chimney') addMedievalProp(kind, npc.x + side * 2.35, npc.z + 0.7, 1.05, side * 0.12);
       }
 
       for (const fake of fakeFortressesRef.current) {
@@ -3637,24 +3818,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
 
       for (const npc of houseNpcsRef.current) {
         const side = npc.x < 0 ? -1 : 1;
-        if (kind === 'wallPlaster') addMedievalExtraProp(kind, npc.x + side * 4.45, npc.z - 0.7, 1.05, Math.PI / 2);
-        if (kind === 'wallBrick' && npc.mood === 'evil') addMedievalExtraProp(kind, npc.x - side * 4.45, npc.z - 0.7, 1.05, Math.PI / 2);
-        if (kind === 'wallWindow') addMedievalExtraProp(kind, npc.x, npc.z - 4.15, 1.02, 0);
-        if (kind === 'roofDormer' && npc.id % 2 === 0) addMedievalExtraProp(kind, npc.x + side * 1.8, npc.z - 0.8, 0.92, side * 0.18);
-        if (kind === 'roofWood' && npc.id % 3 === 1) addMedievalExtraProp(kind, npc.x - side * 1.7, npc.z + 0.5, 0.9, Math.PI / 2);
-        if (kind === 'floorBrick') addMedievalExtraProp(kind, npc.x, npc.z - 5.35, 1.35, npc.x * 0.02);
-        if (kind === 'floorWood') addMedievalExtraProp(kind, npc.x + side * 3.2, npc.z + 4.7, 0.95, npc.id * 0.35);
-        if (kind === 'stairs') addMedievalExtraProp(kind, npc.x, npc.z - 4.75, 0.82, 0);
-        if (kind === 'doorFrame') addMedievalExtraProp(kind, npc.x, npc.z - 3.92, 1.03, 0);
-        if (kind === 'shutter') {
-          addMedievalExtraProp(kind, npc.x - 2.4, npc.z - 4.05, 0.75, 0);
-          addMedievalExtraProp(kind, npc.x + 2.4, npc.z - 4.05, 0.75, 0);
-        }
         if (kind === 'vine2' && npc.mood !== 'evil') addMedievalExtraProp(kind, npc.x - side * 3.75, npc.z - 3.95, 1.28, -side * 0.2);
-        if (kind === 'support') {
-          addMedievalExtraProp(kind, npc.x - 3.4, npc.z - 4.2, 0.85, 0);
-          addMedievalExtraProp(kind, npc.x + 3.4, npc.z - 4.2, 0.85, 0);
-        }
       }
 
       for (const fake of fakeFortressesRef.current) {
@@ -3705,14 +3869,15 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     }
 
     for (const [kind, url] of Object.entries(MEDIEVAL_PROP_URLS) as [MedievalPropKind, string][]) {
-      loadGltf(
+      loadFbx(
         url,
-        (gltf) => {
+        (fbx) => {
           if (stopped) return;
-          const template = gltf.scene;
-          enableAssetShadows(template);
+          const template = fbx;
+          prepareMedievalTemplate(template, kind);
           medievalPropTemplates[kind] = template;
           placeMedievalDecor(kind);
+          replaceProceduralHousesWithFbx();
           markAssetReady(`Декор загружен: ${kind}`);
         },
         () => {
@@ -3724,14 +3889,15 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     }
 
     for (const [kind, url] of Object.entries(MEDIEVAL_EXTRA_PROP_URLS) as [MedievalExtraPropKind, string][]) {
-      loadGltf(
+      loadFbx(
         url,
-        (gltf) => {
+        (fbx) => {
           if (stopped) return;
-          const template = gltf.scene;
-          enableAssetShadows(template);
+          const template = fbx;
+          prepareMedievalTemplate(template, kind);
           medievalExtraPropTemplates[kind] = template;
           placeMedievalExtraDecor(kind);
+          replaceProceduralHousesWithFbx();
           markAssetReady(`MegaKit модель загружена: ${kind}`);
         },
         () => {
