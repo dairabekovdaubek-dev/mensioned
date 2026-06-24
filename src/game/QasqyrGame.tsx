@@ -180,7 +180,7 @@ const EVENT_DURATION = 18;
 const TELEPORT_DURATION = 11;
 const TELEPORT_COOLDOWN = 24;
 const CHUNK_SIZE = 90;
-const CHUNK_RADIUS = 2;
+const CHUNK_RADIUS = 1;
 const FAR_WORLD_LIMIT = 100000;
 const DAY_LENGTH = 210;
 const STAMINA_MAX = 100;
@@ -262,17 +262,9 @@ const WORLD_REAL_TEXTURE_FILES = [
 const GAME_LOADING_TEXTURE_FILES = [
   ...WORLD_REAL_TEXTURE_FILES.map((file) => `textures/world-real/${file}`),
   'models/outfits/fantasy/T_Peasant_BaseColor.png',
-  'models/outfits/fantasy/T_Peasant_Normal.png',
-  'models/outfits/fantasy/T_Peasant_ORM.png',
   'models/outfits/fantasy/T_Ranger_BaseColor.png',
-  'models/outfits/fantasy/T_Ranger_Normal.png',
-  'models/outfits/fantasy/T_Ranger_ORM.png',
   'models/outfits/fantasy/T_Regular_Female_Dark_BaseColor.png',
-  'models/outfits/fantasy/T_Regular_Female_Normal.png',
-  'models/outfits/fantasy/T_Regular_Female_Roughness.png',
   'models/outfits/fantasy/T_Regular_Male_Dark_BaseColor.png',
-  'models/outfits/fantasy/T_Regular_Male_Normal.png',
-  'models/outfits/fantasy/T_Regular_Male_Roughness.png',
   'models/medieval/T_Brick_BaseColor.png',
   'models/medieval/T_RockTrim_BaseColor.png',
   'models/medieval/T_RoundTiles_BaseColor.png',
@@ -1870,7 +1862,7 @@ function makeWorldChunk(cx: number, cz: number) {
   ground.receiveShadow = true;
   group.add(ground);
 
-  const grassCount = terrainRoll > 0.72 ? 78 : terrainRoll > 0.38 ? 142 : 112;
+  const grassCount = terrainRoll > 0.72 ? 32 : terrainRoll > 0.38 ? 56 : 44;
   group.add(makeSteppeGrassPatch(cx, cz, grassCount));
 
   const riverBand = Math.abs(Math.sin(cx * 0.62 + cz * 0.38)) < 0.18;
@@ -1879,7 +1871,7 @@ function makeWorldChunk(cx: number, cz: number) {
     river.rotation.y = Math.sin((cx + cz) * 0.7) * 0.65;
     group.add(river);
     obstacles.push({ x: 0, z: 0, radius: CHUNK_SIZE * 0.54, kind: 'water' });
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 4; i++) {
       const reeds = makeReedCluster();
       const side = i % 2 === 0 ? -1 : 1;
       reeds.position.set(chunkRandom(cx, cz, i + 830, -38, 38), 0, side * chunkRandom(cx, cz, i + 850, 10.8, 16.8));
@@ -1898,7 +1890,7 @@ function makeWorldChunk(cx: number, cz: number) {
   }
 
   if (terrainRoll > 0.76) {
-    const count = 2 + Math.floor(hash2(cx, cz, 3) * 3);
+    const count = 1 + Math.floor(hash2(cx, cz, 3) * 2);
     for (let i = 0; i < count; i++) {
       const mountain = makeMountain();
       mountain.position.set(chunkRandom(cx, cz, i + 10, -32, 32), 0, chunkRandom(cx, cz, i + 20, -32, 32));
@@ -1907,7 +1899,7 @@ function makeWorldChunk(cx: number, cz: number) {
       obstacles.push({ x: mountain.position.x, z: mountain.position.z, radius: 4.8 * scale, kind: 'solid' });
       group.add(mountain);
     }
-    const treeCount = 3 + Math.floor(hash2(cx, cz, 1230) * 5);
+    const treeCount = 2 + Math.floor(hash2(cx, cz, 1230) * 3);
     for (let i = 0; i < treeCount; i++) {
       const tree = makeForestTree();
       tree.position.set(chunkRandom(cx, cz, i + 1240, -40, 40), 0, chunkRandom(cx, cz, i + 1260, -40, 40));
@@ -1918,7 +1910,7 @@ function makeWorldChunk(cx: number, cz: number) {
       group.add(tree);
     }
   } else if (terrainRoll > 0.38) {
-    const count = 18 + Math.floor(hash2(cx, cz, 4) * 24);
+    const count = 7 + Math.floor(hash2(cx, cz, 4) * 10);
     for (let i = 0; i < count; i++) {
       const tree = makeForestTree();
       tree.position.set(chunkRandom(cx, cz, i + 40, -40, 40), 0, chunkRandom(cx, cz, i + 90, -40, 40));
@@ -1928,7 +1920,7 @@ function makeWorldChunk(cx: number, cz: number) {
       obstacles.push({ x: tree.position.x, z: tree.position.z, radius: 0.72 * scale, kind: 'solid' });
       group.add(tree);
     }
-    const logCount = 2 + Math.floor(hash2(cx, cz, 910) * 3);
+    const logCount = 1 + Math.floor(hash2(cx, cz, 910) * 2);
     for (let i = 0; i < logCount; i++) {
       const log = makeFallenLog();
       log.position.set(chunkRandom(cx, cz, i + 930, -35, 35), 0, chunkRandom(cx, cz, i + 950, -35, 35));
@@ -1939,7 +1931,7 @@ function makeWorldChunk(cx: number, cz: number) {
       group.add(log);
     }
   } else {
-    const count = 4 + Math.floor(hash2(cx, cz, 5) * 8);
+    const count = 3 + Math.floor(hash2(cx, cz, 5) * 5);
     for (let i = 0; i < count; i++) {
       const rocks = makeRockCluster();
       rocks.position.set(chunkRandom(cx, cz, i + 220, -40, 40), 0, chunkRandom(cx, cz, i + 260, -40, 40));
@@ -1959,14 +1951,14 @@ function makeWorldChunk(cx: number, cz: number) {
     }
   }
 
-  if (hash2(cx, cz, 1320) > 0.72) {
+  if (hash2(cx, cz, 1320) > 0.82) {
     const cache = makeMedicalSupplyCache();
     cache.position.set(chunkRandom(cx, cz, 1321, -34, 34), 0, chunkRandom(cx, cz, 1322, -34, 34));
     cache.rotation.y = chunkRandom(cx, cz, 1323, 0, Math.PI * 2);
     cache.scale.setScalar(chunkRandom(cx, cz, 1324, 0.85, 1.2));
     group.add(cache);
   }
-  if (hash2(cx, cz, 1330) > 0.78) {
+  if (hash2(cx, cz, 1330) > 0.88) {
     const pistolCache = makeServicePistolCache();
     pistolCache.position.set(chunkRandom(cx, cz, 1331, -34, 34), 0, chunkRandom(cx, cz, 1332, -34, 34));
     pistolCache.rotation.y = chunkRandom(cx, cz, 1333, 0, Math.PI * 2);
@@ -1974,7 +1966,7 @@ function makeWorldChunk(cx: number, cz: number) {
     group.add(pistolCache);
   }
 
-  const detailCount = 10 + Math.floor(hash2(cx, cz, 540) * 13);
+  const detailCount = 5 + Math.floor(hash2(cx, cz, 540) * 7);
   for (let i = 0; i < detailCount; i++) {
     const detail = makeDetailPatch(i + cx * 17 + cz * 31);
     detail.position.set(chunkRandom(cx, cz, i + 560, -42, 42), 0, chunkRandom(cx, cz, i + 590, -42, 42));
@@ -1983,7 +1975,7 @@ function makeWorldChunk(cx: number, cz: number) {
     group.add(detail);
   }
 
-  const trailCount = 1 + Math.floor(hash2(cx, cz, 1010) * 3);
+  const trailCount = 1 + Math.floor(hash2(cx, cz, 1010) * 2);
   for (let i = 0; i < trailCount; i++) {
     const stones = makeTrailStonePatch();
     stones.position.set(chunkRandom(cx, cz, i + 1030, -34, 34), 0, chunkRandom(cx, cz, i + 1050, -34, 34));
@@ -1992,7 +1984,7 @@ function makeWorldChunk(cx: number, cz: number) {
     group.add(stones);
   }
 
-  const terrainPatchCount = 2 + Math.floor(hash2(cx, cz, 1120) * 4);
+  const terrainPatchCount = 1 + Math.floor(hash2(cx, cz, 1120) * 3);
   for (let i = 0; i < terrainPatchCount; i++) {
     const patch = makeRockyTerrainPatch();
     patch.position.set(chunkRandom(cx, cz, i + 1140, -38, 38), 0, chunkRandom(cx, cz, i + 1160, -38, 38));
@@ -2001,7 +1993,7 @@ function makeWorldChunk(cx: number, cz: number) {
   }
 
   if (terrainRoll > 0.34 && terrainRoll < 0.72) {
-    const stumpCount = 3 + Math.floor(hash2(cx, cz, 700) * 5);
+    const stumpCount = 1 + Math.floor(hash2(cx, cz, 700) * 3);
     for (let i = 0; i < stumpCount; i++) {
       const stump = makeTreeStump();
       stump.position.set(chunkRandom(cx, cz, i + 720, -38, 38), 0, chunkRandom(cx, cz, i + 750, -38, 38));
@@ -2735,7 +2727,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
 
     const grassMat = new THREE.MeshStandardMaterial({ color: 0x4d5e36, map: worldTextures().grass, bumpMap: worldTextures().grass, bumpScale: 0.035, roughness: 0.95 });
     const strawMat = new THREE.MeshStandardMaterial({ color: 0xb0a35a, map: worldTextures().grass, bumpMap: worldTextures().grass, bumpScale: 0.025, roughness: 0.98 });
-    for (let i = 0; i < 280; i++) {
+    for (let i = 0; i < 120; i++) {
       const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.18 + (i % 3) * 0.08, 0.9 + (i % 5) * 0.24, 5), i % 4 === 0 ? strawMat : grassMat);
       tuft.position.set(randomRange(-WORLD_HALF, WORLD_HALF), 0.6, randomRange(FINISH_Z + 20, START_Z + 4));
       tuft.rotation.y = i * 0.71;
@@ -2743,34 +2735,34 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       scene.add(tuft);
     }
 
-    for (let i = 0; i < 54; i++) {
+    for (let i = 0; i < 22; i++) {
       placeScenery(scene, makeRockCluster(), randomRange(-WORLD_HALF + 8, WORLD_HALF - 8), randomRange(FINISH_Z + 28, START_Z - 18), randomRange(0.7, 1.8));
     }
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 10; i++) {
       placeScenery(scene, makeForestTree(), randomRange(-WORLD_HALF + 12, WORLD_HALF - 12), randomRange(FINISH_Z + 42, START_Z - 28), randomRange(0.85, 1.55));
     }
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 12; i++) {
       placeScenery(scene, makeDryTree(), randomRange(-WORLD_HALF + 12, WORLD_HALF - 12), randomRange(FINISH_Z + 42, START_Z - 28), randomRange(0.75, 1.4));
     }
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 5; i++) {
       placeScenery(scene, makeRuin(), randomRange(-WORLD_HALF + 28, WORLD_HALF - 28), randomRange(FINISH_Z + 70, START_Z - 60), randomRange(0.7, 1.35));
     }
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 4; i++) {
       placeScenery(scene, makeCampDebris(), randomRange(-WORLD_HALF + 24, WORLD_HALF - 24), randomRange(FINISH_Z + 55, START_Z - 50), randomRange(0.8, 1.3));
     }
-    for (let i = 0; i < 44; i++) {
+    for (let i = 0; i < 16; i++) {
       placeScenery(scene, makeDetailPatch(i), randomRange(-WORLD_HALF + 10, WORLD_HALF - 10), randomRange(FINISH_Z + 28, START_Z - 12), randomRange(0.65, 1.45));
     }
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 8; i++) {
       placeScenery(scene, makeTreeStump(), randomRange(-WORLD_HALF + 18, WORLD_HALF - 18), randomRange(FINISH_Z + 48, START_Z - 34), randomRange(0.65, 1.3));
     }
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 3; i++) {
       placeScenery(scene, makeCoveredCarWreck(), randomRange(-WORLD_HALF + 26, WORLD_HALF - 26), randomRange(FINISH_Z + 70, START_Z - 65), randomRange(0.78, 1.18));
     }
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 4; i++) {
       placeScenery(scene, makeMedicalSupplyCache(), randomRange(-WORLD_HALF + 22, WORLD_HALF - 22), randomRange(FINISH_Z + 65, START_Z - 40), randomRange(0.8, 1.15));
     }
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 2; i++) {
       placeScenery(scene, makeServicePistolCache(), randomRange(-WORLD_HALF + 28, WORLD_HALF - 28), randomRange(FINISH_Z + 85, START_Z - 70), randomRange(0.82, 1.05));
     }
 
@@ -3498,7 +3490,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     }
     addPickup('key', keyRef.current.x, keyRef.current.z);
     addPickup('code', codeRef.current.x, codeRef.current.z);
-    for (let i = 0; i < 22; i++) addEnemy(false);
+    for (let i = 0; i < 14; i++) addEnemy(false);
 
     const clock = new THREE.Clock();
     const music = createDynamicMusic();
