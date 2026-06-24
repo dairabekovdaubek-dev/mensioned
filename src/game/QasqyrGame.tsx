@@ -194,6 +194,7 @@ const DIALOG_REWARD = {
   fail: { gold: 10, premium: 1 },
 };
 const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`;
+const USE_HEAVY_RUNTIME_ASSETS = false;
 const COMPANION_HOUSE: HouseNpc = {
   id: 99,
   name: 'Саят',
@@ -672,6 +673,10 @@ function makeProceduralTexture(name: string, colors: string[], size = 128, strea
 }
 
 function makeAssetTexture(file: string, _fallback: THREE.Texture, repeatX = 1, repeatY = 1) {
+  if (!USE_HEAVY_RUNTIME_ASSETS) {
+    _fallback.repeat.set(repeatX, repeatY);
+    return _fallback;
+  }
   const texture = new THREE.TextureLoader().load(
     assetPath(`textures/world-real/${file}`),
     undefined,
@@ -2983,7 +2988,15 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         }, 450);
       }
     };
+    if (!USE_HEAVY_RUNTIME_ASSETS) {
+      setAssetLoadingProgress(100);
+      setAssetLoadingLabel('Легкий режим: тяжелые 4K ассеты оставлены в ZIP и не грузятся в браузер.');
+      window.setTimeout(() => {
+        if (!stopped) setAssetLoading(false);
+      }, 250);
+    }
     for (const file of GAME_LOADING_TEXTURE_FILES) {
+      if (!USE_HEAVY_RUNTIME_ASSETS) break;
       textureLoader.load(
         assetPath(file),
         () => markAssetReady(`Текстура загружена: ${file}`),
@@ -3003,6 +3016,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     let animationGuide: THREE.Group | null = null;
     const playerOutfitKind = PLAYER_OUTFIT_BY_DIFFICULTY[difficultyRef.current];
     const loadGltf = (url: string, onLoad: (gltf: GLTF) => void, onError: () => void, attempt = 0) => {
+      if (!USE_HEAVY_RUNTIME_ASSETS) return;
       gltfLoader.load(
         url,
         onLoad,
