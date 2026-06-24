@@ -777,6 +777,148 @@ function makeAssetInstance(template: THREE.Group) {
   return asset;
 }
 
+function makeRuntimeOutfit(kind: OutfitKind, role: OutfitRole, mood: NpcMood = 'neutral') {
+  const group = new THREE.Group();
+  const textures = worldTextures();
+  const walkParts: { part: THREE.Object3D; side: number; baseX: number; baseZ: number; role: 'arm' | 'leg' }[] = [];
+  const isEnemy = role === 'enemy' || mood === 'evil';
+  const isRanger = kind === 'maleRanger' || kind === 'femaleRanger';
+  const isFemale = kind === 'femaleRanger' || kind === 'femalePeasant';
+  const clothColor = isEnemy ? 0x3a2a24 : isRanger ? 0x274f62 : 0x5a6f42;
+  const accentColor = isEnemy ? 0x7a201b : isRanger ? 0x70d6ff : 0xffd37b;
+  const skinColor = isEnemy ? 0x8f9570 : isFemale ? 0xc58c68 : 0xb77a54;
+  const cloth = new THREE.MeshStandardMaterial({ color: clothColor, map: textures.grass, roughness: 0.86 });
+  const leather = new THREE.MeshStandardMaterial({ color: 0x3f2a1e, map: textures.bark, roughness: 0.9 });
+  const skin = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.72 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xbec5c2, map: textures.rock, metalness: 0.28, roughness: 0.34 });
+  const dark = new THREE.MeshStandardMaterial({ color: isEnemy ? 0x140f0d : 0x1b1714, roughness: 0.9 });
+  const accent = new THREE.MeshStandardMaterial({
+    color: accentColor,
+    emissive: accentColor,
+    emissiveIntensity: isEnemy ? 0.05 : 0.08,
+    roughness: 0.58,
+  });
+
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(isFemale ? 0.44 : 0.5, 1.42, 7, 16), cloth);
+  body.position.y = 1.46;
+  body.scale.set(isFemale ? 0.88 : 0.98, 1.06, 0.72);
+  body.castShadow = true;
+  group.add(body);
+
+  const chestPlate = new THREE.Mesh(new THREE.BoxGeometry(isFemale ? 0.66 : 0.74, 0.76, 0.08), isRanger ? metal : leather);
+  chestPlate.position.set(0, 1.55, -0.42);
+  chestPlate.castShadow = true;
+  group.add(chestPlate);
+
+  const sash = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.12, 0.11), accent);
+  sash.position.set(0, 1.22, -0.45);
+  sash.rotation.z = isEnemy ? -0.18 : 0.18;
+  group.add(sash);
+
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(1.08, 0.16, 0.22), leather);
+  belt.position.set(0, 1.02, -0.02);
+  group.add(belt);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 18, 14), skin);
+  head.position.set(0, 2.58, -0.05);
+  head.scale.set(0.92, 1.08, 0.86);
+  head.castShadow = true;
+  group.add(head);
+
+  const hood = new THREE.Mesh(new THREE.SphereGeometry(0.41, 16, 12), isRanger || isEnemy ? dark : leather);
+  hood.position.set(0, 2.76, 0.02);
+  hood.scale.set(1.0, 0.52, 0.92);
+  hood.castShadow = true;
+  group.add(hood);
+
+  const eyeMat = new THREE.MeshBasicMaterial({ color: isEnemy ? 0xffefe5 : 0x101010 });
+  const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), eyeMat);
+  const rightEye = leftEye.clone();
+  leftEye.position.set(-0.11, 2.64, -0.34);
+  rightEye.position.set(0.11, 2.64, -0.34);
+  group.add(leftEye, rightEye);
+
+  const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.052, 8, 24), accent);
+  scarf.position.y = 2.13;
+  scarf.rotation.x = Math.PI / 2;
+  group.add(scarf);
+
+  const shoulderGeo = new THREE.SphereGeometry(0.17, 10, 8);
+  for (const side of [-1, 1]) {
+    const shoulder = new THREE.Mesh(shoulderGeo, isRanger ? metal : leather);
+    shoulder.position.set(side * 0.5, 1.94, -0.04);
+    shoulder.scale.set(1.2, 0.72, 0.9);
+    shoulder.castShadow = true;
+    group.add(shoulder);
+
+    const upperArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.105, 0.58, 4, 8), cloth);
+    upperArm.position.set(side * 0.62, 1.63, -0.04);
+    upperArm.rotation.z = side * 0.28;
+    upperArm.castShadow = true;
+    group.add(upperArm);
+    walkParts.push({ part: upperArm, side, baseX: upperArm.rotation.x, baseZ: upperArm.rotation.z, role: 'arm' });
+
+    const forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.55, 4, 8), isEnemy ? skin : leather);
+    forearm.position.set(side * 0.78, 1.18, -0.28);
+    forearm.rotation.x = isEnemy ? -0.8 : -0.45;
+    forearm.rotation.z = side * 0.18;
+    forearm.castShadow = true;
+    group.add(forearm);
+    walkParts.push({ part: forearm, side, baseX: forearm.rotation.x, baseZ: forearm.rotation.z, role: 'arm' });
+
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), skin);
+    hand.position.set(side * 0.83, 0.94, -0.46);
+    hand.scale.set(0.78, 0.62, 1);
+    hand.castShadow = true;
+    group.add(hand);
+
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.135, 0.76, 4, 8), leather);
+    thigh.position.set(side * 0.22, 0.72, 0.02);
+    thigh.castShadow = true;
+    group.add(thigh);
+    walkParts.push({ part: thigh, side, baseX: thigh.rotation.x, baseZ: thigh.rotation.z, role: 'leg' });
+
+    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.115, 0.68, 4, 8), dark);
+    shin.position.set(side * 0.22, 0.22, -0.04);
+    shin.castShadow = true;
+    group.add(shin);
+    walkParts.push({ part: shin, side, baseX: shin.rotation.x, baseZ: shin.rotation.z, role: 'leg' });
+
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.48), dark);
+    boot.position.set(side * 0.22, 0.03, -0.2);
+    boot.castShadow = true;
+    group.add(boot);
+  }
+
+  const cape = new THREE.Mesh(new THREE.BoxGeometry(0.78, 1.28, 0.05), new THREE.MeshStandardMaterial({ color: isEnemy ? 0x251312 : 0x253d37, map: textures.grass, roughness: 0.94 }));
+  cape.position.set(0, 1.42, 0.48);
+  cape.rotation.x = -0.12;
+  cape.castShadow = true;
+  group.add(cape);
+
+  if (isRanger) {
+    const quiver = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 0.92, 10), leather);
+    quiver.position.set(-0.34, 1.55, 0.62);
+    quiver.rotation.z = -0.38;
+    quiver.castShadow = true;
+    group.add(quiver);
+  }
+
+  if (isEnemy) {
+    const wound = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.08, 0.04), accent);
+    wound.position.set(0.16, 2.42, -0.36);
+    wound.rotation.z = 0.25;
+    group.add(wound);
+    group.rotation.z = randomRange(-0.08, 0.08);
+  }
+
+  group.userData.walkParts = walkParts;
+  group.userData.phase = randomRange(0, Math.PI * 2);
+  group.userData.baseRotZ = group.rotation.z;
+  group.name = role === 'player' ? 'Runtime Modular Player Outfit' : role === 'enemy' ? 'Runtime Modular Enemy Outfit' : 'Runtime Modular NPC Outfit';
+  return { mesh: group, walkParts };
+}
+
 function makeEnemy() {
   const group = new THREE.Group();
   const walkParts: { part: THREE.Object3D; side: number; baseX: number; baseZ: number }[] = [];
@@ -2982,6 +3124,13 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     };
     refreshHeldWeaponModel();
     player.add(playerBody, shirtFront, playerHead, hair, nose, leftEye, rightEye, mouth, hat, belt, pack, scarf, hloodAura, heldWeaponModel);
+    const runtimePlayerOutfit = makeRuntimeOutfit(PLAYER_OUTFIT_BY_DIFFICULTY[difficultyRef.current], 'player');
+    runtimePlayerOutfit.mesh.position.set(0, -0.08, 0.04);
+    player.add(runtimePlayerOutfit.mesh);
+    for (const limb of runtimePlayerOutfit.walkParts) playerWalkParts.push(limb);
+    for (const part of [playerBody, shirtFront, playerHead, hair, nose, leftEye, rightEye, mouth, hat, belt, pack, scarf]) {
+      part.visible = false;
+    }
     scene.add(player);
     const gltfLoader = new GLTFLoader();
     const textureLoader = new THREE.TextureLoader();
@@ -3098,7 +3247,11 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     const createEnemyModel = () => {
       const templates = enemyTemplatePool();
       const template = templates.length > 0 ? templates[Math.floor(Math.random() * templates.length)] : null;
-      if (!template) return { mesh: makeEnemy(), animator: undefined };
+      if (!template) {
+        if (Math.random() < 0.18) return { mesh: makeEnemy(), animator: undefined };
+        const fallback = makeRuntimeOutfit(Math.random() > 0.5 ? 'maleRanger' : 'femalePeasant', 'enemy', 'evil');
+        return { mesh: fallback.mesh, animator: undefined };
+      }
 
       const mesh = new THREE.Group();
       const outfit = makeOutfitInstance(template, 'enemy');
@@ -3126,7 +3279,14 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     };
     const createNpcModel = (npc: HouseNpc) => {
       const template = npcTemplateFor(npc);
-      if (!template) return { mesh: makeNpcFigure(npc.mood), animator: undefined };
+      if (!template) {
+        const fallback = makeRuntimeOutfit(
+          npc.mood === 'evil' ? 'maleRanger' : npc.id % 2 === 0 ? 'malePeasant' : 'femalePeasant',
+          'npc',
+          npc.mood,
+        );
+        return { mesh: fallback.mesh, animator: undefined };
+      }
       const mesh = new THREE.Group();
       const outfit = makeOutfitInstance(template, 'npc');
       outfit.position.set(0, -0.08, 0.04);
@@ -3146,7 +3306,8 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       if (companionMesh || !companionRecruitedRef.current || !companionAliveRef.current) return;
       const template = outfitTemplates.malePeasant ?? outfitTemplates.femalePeasant ?? outfitTemplates.femaleRanger ?? outfitTemplates.maleRanger;
       const mesh = new THREE.Group();
-      const root = template ? makeOutfitInstance(template, 'npc') : makeNpcFigure('good');
+      const runtimeFallback = template ? null : makeRuntimeOutfit('malePeasant', 'npc', 'good');
+      const root = template ? makeOutfitInstance(template, 'npc') : runtimeFallback!.mesh;
       root.position.set(0, -0.08, 0.04);
       root.rotation.y = Math.PI;
       mesh.add(root);
@@ -3330,6 +3491,8 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         }
       }
     };
+
+    replaceFallbackNpcs();
 
     for (const [kind, url] of Object.entries(OUTFIT_URLS) as [OutfitKind, string][]) {
       loadGltf(
@@ -3880,7 +4043,8 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
           if (dist < 8.5) enterHouse(COMPANION_HOUSE);
         }
       }
-      companionHouseFigure.visible = !companionRecruitedRef.current;
+      const companionHouseNpcFigure = npcFigures.find((entry) => entry.npc.id === COMPANION_HOUSE.id)?.mesh ?? companionHouseFigure;
+      companionHouseNpcFigure.visible = !companionRecruitedRef.current;
 
       player.position.copy(playerRef.current);
       player.rotation.y = playerYaw;
@@ -3941,6 +4105,17 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         }
         companionMesh.position.y = terrainHeightAt(companionMesh.position.x, companionMesh.position.z);
         playCharacterAnimation(companionAnimator, companionMoving ? 'walk' : 'idle');
+        const companionWalkParts = companionMesh.userData.outfitRoot instanceof THREE.Object3D
+          ? companionMesh.userData.outfitRoot.userData.walkParts as { part: THREE.Object3D; side: number; baseX: number; baseZ: number; role: 'arm' | 'leg' }[] | undefined
+          : undefined;
+        if (companionWalkParts) {
+          companionMesh.userData.phase = (companionMesh.userData.phase ?? 0) + dt * (companionMoving ? 7.2 : 2.2);
+          const companionStep = Math.sin(companionMesh.userData.phase);
+          for (const limb of companionWalkParts) {
+            limb.part.rotation.x = limb.baseX + companionStep * (limb.role === 'arm' ? 0.46 : 0.34) * (companionMoving ? 1 : 0.16);
+            limb.part.rotation.z = limb.baseZ + companionStep * (limb.role === 'arm' ? 0.08 : 0.04) * (companionMoving ? 1 : 0.16);
+          }
+        }
 
         let nearest: Enemy | null = null;
         let nearestDist = Infinity;
