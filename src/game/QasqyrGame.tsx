@@ -1366,10 +1366,47 @@ function makeForestTree() {
   return group;
 }
 
+function makeJacarandaTree() {
+  const group = new THREE.Group();
+  const textures = worldTextures();
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x57402f, map: textures.islandBark, bumpMap: textures.bark, bumpScale: 0.08, roughness: 0.92 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x7c6cc8, map: textures.islandLeaves, bumpMap: textures.leaves, bumpScale: 0.028, roughness: 0.86 });
+  const bloomMat = new THREE.MeshStandardMaterial({ color: 0xb698ff, emissive: 0x35215f, emissiveIntensity: 0.08, roughness: 0.74 });
+
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.34, 3.2, 8), trunkMat);
+  trunk.position.y = 1.6;
+  trunk.rotation.z = randomRange(-0.08, 0.08);
+  trunk.castShadow = true;
+  group.add(trunk);
+
+  for (const side of [-1, 1]) {
+    const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.13, 1.55, 7), trunkMat);
+    branch.position.set(side * 0.44, 2.55, 0);
+    branch.rotation.z = side * 0.72;
+    branch.rotation.x = randomRange(-0.24, 0.24);
+    branch.castShadow = true;
+    group.add(branch);
+  }
+
+  for (let i = 0; i < 5; i++) {
+    const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(randomRange(0.78, 1.14), 1), i % 2 === 0 ? leafMat : bloomMat);
+    crown.position.set(randomRange(-0.95, 0.95), randomRange(3.05, 4.15), randomRange(-0.85, 0.85));
+    crown.scale.set(randomRange(1.1, 1.65), randomRange(0.65, 1.0), randomRange(1.0, 1.45));
+    crown.castShadow = true;
+    group.add(crown);
+  }
+  return group;
+}
+
+function makeAssetTree(cx = 0, cz = 0, salt = 0) {
+  return hash2(cx, cz, salt) > 0.56 ? makeJacarandaTree() : makeForestTree();
+}
+
 function makeMountain() {
   const group = new THREE.Group();
   const textures = worldTextures();
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x73736b, map: textures.boulder, bumpMap: textures.rock, bumpScale: 0.14, roughness: 0.98, flatShading: true });
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x73736b, map: textures.rockyTerrain, bumpMap: textures.rockMoss, bumpScale: 0.16, roughness: 0.98, flatShading: true });
+  const mossMat = new THREE.MeshStandardMaterial({ color: 0x66775e, map: textures.rockMoss, bumpMap: textures.rock, bumpScale: 0.09, roughness: 0.98, flatShading: true });
   const snowMat = new THREE.MeshStandardMaterial({ color: 0xd9e5e2, map: textures.snow, bumpMap: textures.snow, bumpScale: 0.025, roughness: 0.82, flatShading: true });
   const height = randomRange(9, 18);
   const base = randomRange(7, 14);
@@ -1387,7 +1424,7 @@ function makeMountain() {
   group.add(cap);
 
   for (let i = 0; i < 3; i++) {
-    const shoulder = new THREE.Mesh(new THREE.ConeGeometry(base * randomRange(0.35, 0.62), height * randomRange(0.35, 0.58), 5), rockMat);
+    const shoulder = new THREE.Mesh(new THREE.ConeGeometry(base * randomRange(0.35, 0.62), height * randomRange(0.35, 0.58), 5), i % 2 === 0 ? mossMat : rockMat);
     shoulder.position.set(randomRange(-base * 0.52, base * 0.52), shoulder.geometry.parameters.height / 2, randomRange(-base * 0.52, base * 0.52));
     shoulder.rotation.y = randomRange(0, Math.PI);
     shoulder.castShadow = true;
@@ -1863,7 +1900,28 @@ function makeHouse(mood: NpcMood) {
   windowA.position.set(-2.4, 2.35, -3.64);
   windowB.position.set(2.4, 2.35, -3.64);
 
-  group.add(wall, roof, door, windowA, windowB);
+  const beamMat = new THREE.MeshStandardMaterial({ color: 0x372417, map: textures.bark, bumpMap: textures.bark, bumpScale: 0.045, roughness: 0.88 });
+  for (const x of [-3.75, 3.75]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.28, 4.55, 0.24), beamMat);
+    post.position.set(x, 2.28, -3.64);
+    post.castShadow = true;
+    group.add(post);
+  }
+  for (const y of [0.42, 4.18]) {
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(8.25, 0.24, 0.26), beamMat);
+    beam.position.set(0, y, -3.66);
+    beam.castShadow = true;
+    group.add(beam);
+  }
+  const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.68, 1.55, 0.68), new THREE.MeshStandardMaterial({ color: 0x5c4a3c, map: textures.rockyTerrain, roughness: 0.9 }));
+  chimney.position.set(2.35, 6.15, 0.72);
+  chimney.castShadow = true;
+  const steps = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.28, 1.28), new THREE.MeshStandardMaterial({ color: 0x7a7467, map: textures.rockMoss, roughness: 0.94 }));
+  steps.position.set(0, 0.14, -4.34);
+  steps.castShadow = true;
+  steps.receiveShadow = true;
+
+  group.add(wall, roof, door, windowA, windowB, chimney, steps);
   return group;
 }
 
@@ -2065,7 +2123,7 @@ function makeWorldChunk(cx: number, cz: number) {
     }
     const treeCount = 2 + Math.floor(hash2(cx, cz, 1230) * 3);
     for (let i = 0; i < treeCount; i++) {
-      const tree = makeForestTree();
+      const tree = makeAssetTree(cx, cz, i + 1240);
       tree.position.set(chunkRandom(cx, cz, i + 1240, -40, 40), 0, chunkRandom(cx, cz, i + 1260, -40, 40));
       tree.rotation.y = chunkRandom(cx, cz, i + 1280, 0, Math.PI * 2);
       const scale = chunkRandom(cx, cz, i + 1300, 0.68, 1.18);
@@ -2076,7 +2134,7 @@ function makeWorldChunk(cx: number, cz: number) {
   } else if (terrainRoll > 0.38) {
     const count = 7 + Math.floor(hash2(cx, cz, 4) * 10);
     for (let i = 0; i < count; i++) {
-      const tree = makeForestTree();
+      const tree = makeAssetTree(cx, cz, i + 40);
       tree.position.set(chunkRandom(cx, cz, i + 40, -40, 40), 0, chunkRandom(cx, cz, i + 90, -40, 40));
       tree.rotation.y = chunkRandom(cx, cz, i + 140, 0, Math.PI * 2);
       const scale = chunkRandom(cx, cz, i + 180, 0.72, 1.38);
@@ -2104,7 +2162,7 @@ function makeWorldChunk(cx: number, cz: number) {
       obstacles.push({ x: rocks.position.x, z: rocks.position.z, radius: 1.8 * scale, kind: 'solid' });
       group.add(rocks);
     }
-    if (hash2(cx, cz, 1220) > 0.64) {
+    if (hash2(cx, cz, 1220) > 0.42) {
       const car = makeCoveredCarWreck();
       car.position.set(chunkRandom(cx, cz, 1221, -34, 34), 0, chunkRandom(cx, cz, 1222, -34, 34));
       car.rotation.y = chunkRandom(cx, cz, 1223, 0, Math.PI * 2);
@@ -2113,6 +2171,16 @@ function makeWorldChunk(cx: number, cz: number) {
       obstacles.push({ x: car.position.x, z: car.position.z, radius: 2.1 * scale, kind: 'solid' });
       group.add(car);
     }
+  }
+
+  if (hash2(cx, cz, 1500) > 0.78) {
+    const car = makeCoveredCarWreck();
+    car.position.set(chunkRandom(cx, cz, 1501, -36, 36), 0, chunkRandom(cx, cz, 1502, -36, 36));
+    car.rotation.y = chunkRandom(cx, cz, 1503, 0, Math.PI * 2);
+    const scale = chunkRandom(cx, cz, 1504, 0.66, 0.96);
+    car.scale.setScalar(scale);
+    obstacles.push({ x: car.position.x, z: car.position.z, radius: 2.1 * scale, kind: 'solid' });
+    group.add(car);
   }
 
   if (hash2(cx, cz, 1320) > 0.82) {
@@ -3852,6 +3920,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
 
     const keyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
+      if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(key)) e.preventDefault();
       if (key === 'escape') {
         setPhase('intro');
         onExit?.();
@@ -3899,7 +3968,10 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     const pointerLockChange = () => {
       renderer.domElement.style.cursor = document.pointerLockElement === renderer.domElement ? 'none' : '';
     };
-    const pointerDown = () => attack();
+    const pointerDown = () => {
+      renderer.domElement.focus();
+      attack();
+    };
 
     window.addEventListener('resize', resize);
     window.addEventListener('keydown', keyDown);
@@ -4748,6 +4820,15 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
 
       {phase === 'playing' && (
         <>
+          <button
+            type="button"
+            style={styles.focusControl}
+            onClick={() => {
+              mountRef.current?.querySelector('canvas')?.requestPointerLock?.();
+            }}
+          >
+            WASD move · click to focus
+          </button>
           <div style={styles.hud}>
             <div style={styles.stat}><b>HP</b><span>{hud.hp}</span></div>
             <div style={styles.stat}><b>Time</b><span>{hud.timeOfDay}</span></div>
@@ -5165,6 +5246,21 @@ const styles: Record<string, CSSProperties> = {
     color: '#fff',
     borderRadius: 8,
     padding: '10px 14px',
+  },
+  focusControl: {
+    position: 'absolute',
+    top: 64,
+    right: 16,
+    zIndex: 3,
+    border: '1px solid rgba(112,214,255,.42)',
+    background: 'rgba(8,22,28,.78)',
+    color: '#d9f7ff',
+    borderRadius: 8,
+    padding: '10px 14px',
+    fontSize: 13,
+    fontWeight: 900,
+    cursor: 'pointer',
+    pointerEvents: 'auto',
   },
   hud: {
     position: 'absolute',
