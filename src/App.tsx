@@ -3,10 +3,12 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { Auth } from './components/Auth';
 import { Reviews } from './components/Reviews';
+import { PresentationPage } from './components/Presentation';
 import { QasqyrGame } from './game/QasqyrGame';
 import { useGameAssetPreload } from './lib/assetPreload';
 
 export default function App() {
+  const path = window.location.pathname;
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState(false);
@@ -25,6 +27,14 @@ export default function App() {
     });
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  if (path === '/presentation') {
+    return <PresentationPage />;
+  }
+
+  if (path === '/mobile') {
+    return <QasqyrGame userId={session?.user.id} onExit={() => window.location.assign('/')} />;
+  }
 
   if (loading) {
     return (
