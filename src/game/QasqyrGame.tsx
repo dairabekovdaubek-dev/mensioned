@@ -195,6 +195,23 @@ const DIALOG_REWARD = {
 };
 const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`;
 const USE_HEAVY_RUNTIME_ASSETS = false;
+const ZIP_ASSET_PACKS = [
+  'Medieval Village MegaKit[Standard].zip',
+  'Medieval Village MegaKit[Standard] (1).zip',
+  'Modular Character Outfits - Fantasy[Standard].zip',
+  'Universal Animation Library 2[Standard].zip',
+  'boulder_01_4k.blend.zip',
+  'covered_car_4k.blend.zip',
+  'fish_knife_4k.blend.zip',
+  'island_tree_02_4k.blend.zip',
+  'jacaranda_tree_4k.blend.zip',
+  'medical_box_4k.blend.zip',
+  'modular_wooden_pier_4k.blend.zip',
+  'rock_moss_set_01_4k.blend.zip',
+  'rocky_terrain_02_4k.blend.zip',
+  'service_pistol_4k.blend.zip',
+  'tree_stump_01_4k.blend.zip',
+];
 const COMPANION_HOUSE: HouseNpc = {
   id: 99,
   name: 'Саят',
@@ -4713,6 +4730,16 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
                   <p style={styles.shopLog}>{caseLog}</p>
                 </div>
               )}
+
+              <div style={styles.assetPackPanel}>
+                <b>ZIP asset packs in game</b>
+                <span>Archives are kept as source packs. The map uses optimized runtime versions so the browser does not freeze.</span>
+                <div style={styles.assetPackGrid}>
+                  {ZIP_ASSET_PACKS.map((pack) => (
+                    <small key={pack} style={styles.assetPackItem}>{pack}</small>
+                  ))}
+                </div>
+              </div>
             </>
           )}
           {phase === 'tutorial' && (
@@ -5701,6 +5728,32 @@ const styles: Record<string, CSSProperties> = {
     gap: 6,
     fontWeight: 900,
     cursor: 'pointer',
+  },
+  assetPackPanel: {
+    display: 'grid',
+    gap: 8,
+    margin: '0 0 18px',
+    padding: 12,
+    border: '1px solid rgba(255,255,255,.14)',
+    borderRadius: 8,
+    background: 'rgba(0,0,0,.16)',
+    color: '#d8d1c3',
+    textAlign: 'left',
+  },
+  assetPackGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 6,
+    maxHeight: 112,
+    overflow: 'auto',
+  },
+  assetPackItem: {
+    display: 'block',
+    padding: '6px 8px',
+    borderRadius: 6,
+    background: 'rgba(255,255,255,.06)',
+    color: '#f6f2e9',
+    overflowWrap: 'anywhere',
   },
   caseStage: {
     position: 'relative',
