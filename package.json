@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "video:gameplay": "node scripts/record-gameplay.mjs",
+    "video:trailer": "node scripts/generate-gameplay-trailer.mjs",
     "db:login": "supabase login",
     "db:link": "supabase link",
     "db:new": "supabase migration new",

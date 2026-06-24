@@ -13,7 +13,8 @@ type PromoShot = {
 };
 
 const APP_NAME = 'QASQYR 3D';
-const MOBILE_GAME_URL = 'https://mensioned.vercel.app/mobile';
+const MOBILE_GAME_URL = 'https://mensioned.vercel.app/mobile?v=graphics-20260624';
+const GAMEPLAY_VIDEO_SRC = '/presentation/qasqyr-gameplay-recording.webm';
 
 const promoShots: PromoShot[] = [
   {
@@ -103,37 +104,26 @@ export function PresentationPage() {
               магазин скинов и QR-переход на мобильную версию.
             </p>
           </div>
-          <div style={styles.videoFrame} className={demoPlaying ? 'qasqyr-demo is-playing' : 'qasqyr-demo'}>
-            <div className="demo-bg" />
-            <div className="demo-mountains" />
-            <div className="demo-water" />
-            <div className="demo-road" />
-            <div className="demo-village" />
-            <div className="demo-player" />
-            <div className="demo-companion" />
-            <div className="demo-enemy demo-enemy-a" />
-            <div className="demo-enemy demo-enemy-b" />
-            <div className="demo-knife" />
-            <div className="demo-case" />
-            <div className="demo-hud">
-              <span>Story</span>
-              <span>AI teammate</span>
-              <span>HP 100</span>
-            </div>
-            <div className="demo-caption">
-              <span>1. Выбор режима</span>
-              <span>2. Исследование карты</span>
-              <span>3. Напарник помогает</span>
-              <span>4. Скины и награды</span>
+          <div style={styles.videoFrame}>
+            <video
+              key={demoPlaying ? 'gameplay-playing' : 'gameplay-paused'}
+              style={styles.gameplayVideo}
+              src={GAMEPLAY_VIDEO_SRC}
+              poster="/presentation/qasqyr-gameplay-3d.png"
+              controls={demoPlaying}
+              autoPlay={demoPlaying}
+              muted
+              loop
+              playsInline
+            />
+            <div style={styles.videoOverlay}>
+              <span style={styles.videoOverlayBadge}>3D survival</span>
+              <span style={styles.videoOverlayBadge}>AI-напарник</span>
+              <span style={styles.videoOverlayBadge}>Бой и исследование</span>
             </div>
             {!demoPlaying && (
-              <button type="button" style={styles.playCircle} onClick={() => setDemoPlaying(true)}>
+              <button type="button" style={styles.playCircle} onClick={() => setDemoPlaying(true)} aria-label="Play gameplay recording">
                 ▶
-              </button>
-            )}
-            {demoPlaying && (
-              <button type="button" style={styles.replayButton} onClick={() => setDemoPlaying(false)}>
-                Replay
               </button>
             )}
           </div>
@@ -551,11 +541,39 @@ const styles: Record<string, CSSProperties> = {
   videoFrame: {
     position: 'relative',
     minHeight: 420,
+    aspectRatio: '16 / 9',
     borderRadius: 8,
     overflow: 'hidden',
     border: '1px solid rgba(255,255,255,.18)',
     background: '#0c1110',
     boxShadow: '0 24px 70px rgba(0,0,0,.32)',
+  },
+  gameplayVideo: {
+    width: '100%',
+    height: '100%',
+    minHeight: 420,
+    objectFit: 'cover',
+    display: 'block',
+    background: '#0c1110',
+  },
+  videoOverlay: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    top: 16,
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    pointerEvents: 'none',
+  },
+  videoOverlayBadge: {
+    padding: '8px 10px',
+    borderRadius: 8,
+    border: '1px solid rgba(255,255,255,.18)',
+    background: 'rgba(10,14,12,.74)',
+    color: '#f8f4ea',
+    fontWeight: 900,
+    fontSize: 13,
   },
   playCircle: {
     position: 'absolute',

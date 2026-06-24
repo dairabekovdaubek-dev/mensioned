@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -19,6 +19,10 @@ type CaseOpening = { caseType: string; rewardName: string; rarity: SkinRarity; i
 type VisionKind = '' | 'bloodmoon' | 'echo' | 'whiteout';
 type DayPhase = 'dawn' | 'day' | 'dusk' | 'night';
 type WalkMode = 'walk' | 'sneak' | 'sprint' | 'tired';
+type LockableScreenOrientation = ScreenOrientation & {
+  lock?: (orientation: 'landscape' | 'portrait') => Promise<void>;
+  unlock?: () => void;
+};
 
 type Enemy = {
   mesh: THREE.Group;
@@ -80,6 +84,40 @@ type QuestItem = {
   z: number;
   collected: boolean;
 };
+
+function useMobileLayout() {
+  const [mobile, setMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 760px), (pointer: coarse)').matches;
+  });
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 760px), (pointer: coarse)');
+    const update = () => setMobile(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  return mobile;
+}
+
+function usePortraitLayout() {
+  const [portrait, setPortrait] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(orientation: portrait)').matches;
+  });
+
+  useEffect(() => {
+    const query = window.matchMedia('(orientation: portrait)');
+    const update = () => setPortrait(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  return portrait;
+}
 
 type NpcChoice = {
   text: string;
@@ -194,24 +232,9 @@ const DIALOG_REWARD = {
   fail: { gold: 10, premium: 1 },
 };
 const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`;
-const USE_HEAVY_RUNTIME_ASSETS = false;
-const ZIP_ASSET_PACKS = [
-  'Medieval Village MegaKit[Standard].zip',
-  'Medieval Village MegaKit[Standard] (1).zip',
-  'Modular Character Outfits - Fantasy[Standard].zip',
-  'Universal Animation Library 2[Standard].zip',
-  'boulder_01_4k.blend.zip',
-  'covered_car_4k.blend.zip',
-  'fish_knife_4k.blend.zip',
-  'island_tree_02_4k.blend.zip',
-  'jacaranda_tree_4k.blend.zip',
-  'medical_box_4k.blend.zip',
-  'modular_wooden_pier_4k.blend.zip',
-  'rock_moss_set_01_4k.blend.zip',
-  'rocky_terrain_02_4k.blend.zip',
-  'service_pistol_4k.blend.zip',
-  'tree_stump_01_4k.blend.zip',
-];
+const USE_CHARACTER_RUNTIME_ASSETS = true;
+const USE_WORLD_TEXTURE_ASSETS = true;
+const USE_WORLD_RUNTIME_ASSETS = false;
 const COMPANION_HOUSE: HouseNpc = {
   id: 99,
   name: 'Саят',
@@ -308,9 +331,9 @@ const DIFFICULTY: Record<Difficulty, {
   eventInterval: number;
   score: number;
 }> = {
-  story: { label: 'Story', hp: 125, enemyHp: 0.82, enemySpeed: 0.88, enemyDamage: 0.72, spawn: 1.28, eventInterval: 78, score: 0.85 },
-  survival: { label: 'Survival', hp: 100, enemyHp: 1, enemySpeed: 1, enemyDamage: 1, spawn: 1, eventInterval: 60, score: 1 },
-  nightmare: { label: 'Nightmare', hp: 82, enemyHp: 1.32, enemySpeed: 1.22, enemyDamage: 1.36, spawn: 0.72, eventInterval: 42, score: 1.35 },
+  story: { label: 'Сюжет', hp: 125, enemyHp: 0.82, enemySpeed: 0.88, enemyDamage: 0.72, spawn: 1.28, eventInterval: 78, score: 0.85 },
+  survival: { label: 'Выживание', hp: 100, enemyHp: 1, enemySpeed: 1, enemyDamage: 1, spawn: 1, eventInterval: 60, score: 1 },
+  nightmare: { label: 'Кошмар', hp: 82, enemyHp: 1.32, enemySpeed: 1.22, enemyDamage: 1.36, spawn: 0.72, eventInterval: 42, score: 1.35 },
 };
 
 const MODE_DESCRIPTIONS: Record<Difficulty, string> = {
@@ -571,13 +594,14 @@ function findAnimationClip(clips: THREE.AnimationClip[], names: string[]) {
     const clip = THREE.AnimationClip.findByName(clips, name);
     if (clip) return clip;
   }
-  return null;
+  const lowerNames = names.map((name) => name.toLowerCase());
+  return clips.find((clip) => lowerNames.some((name) => clip.name.toLowerCase().includes(name.toLowerCase()))) ?? null;
 }
 
 function createCharacterAnimator(root: THREE.Object3D, clips: THREE.AnimationClip[], zombie = false): CharacterAnimator | null {
-  const idle = findAnimationClip(clips, zombie ? ['Zombie_Idle_Loop', 'Idle_No_Loop'] : ['Idle_Lantern_Loop', 'Idle_FoldArms_Loop', 'Idle_No_Loop']);
-  const walk = findAnimationClip(clips, zombie ? ['Zombie_Walk_Fwd_Loop', 'Walk_Carry_Loop'] : ['Walk_Carry_Loop', 'Zombie_Walk_Fwd_Loop']);
-  const attack = findAnimationClip(clips, zombie ? ['Zombie_Scratch', 'Melee_Hook'] : ['Sword_Regular_A', 'Melee_Hook']);
+  const idle = findAnimationClip(clips, zombie ? ['Zombie_Idle_Loop', 'Zombie Idle', 'Idle_No_Loop', 'Idle'] : ['Idle_Lantern_Loop', 'Idle_FoldArms_Loop', 'Idle_No_Loop', 'Idle']);
+  const walk = findAnimationClip(clips, zombie ? ['Zombie_Walk_Fwd_Loop', 'Zombie Walk', 'Walk_Fwd', 'Walk'] : ['Walk_Carry_Loop', 'Walk_Fwd', 'Run_Fwd', 'Walk']);
+  const attack = findAnimationClip(clips, zombie ? ['Zombie_Scratch', 'Zombie Attack', 'Scratch', 'Melee_Hook', 'Attack'] : ['Sword_Regular_A', 'Melee_Hook', 'Attack', 'Slash']);
   if (!idle && !walk && !attack) return null;
 
   const mixer = new THREE.AnimationMixer(root);
@@ -690,7 +714,7 @@ function makeProceduralTexture(name: string, colors: string[], size = 128, strea
 }
 
 function makeAssetTexture(file: string, _fallback: THREE.Texture, repeatX = 1, repeatY = 1) {
-  if (!USE_HEAVY_RUNTIME_ASSETS) {
+  if (!USE_WORLD_TEXTURE_ASSETS) {
     _fallback.repeat.set(repeatX, repeatY);
     return _fallback;
   }
@@ -723,8 +747,8 @@ function worldTextures() {
       leaves,
       rock,
       snow: makeProceduralTexture('snow cap texture', ['#d9e5e2', '#f4f1e8', '#b7c8c7', '#edf8f4'], 96, 0.2),
-      roof: makeProceduralTexture('dark roof texture', ['#2b1715', '#3f2b1f', '#17120f', '#60412c'], 128, 0.82),
-      wall: makeProceduralTexture('mud wall texture', ['#6f7f63', '#746957', '#4f3a35', '#8a7d5e'], 128, 0.36),
+      roof: makeAssetTexture('medieval_roof_tiles.png', makeProceduralTexture('dark roof texture', ['#2b1715', '#3f2b1f', '#17120f', '#60412c'], 128, 0.82), 2.2, 2.2),
+      wall: makeAssetTexture('medieval_plaster.png', makeProceduralTexture('mud wall texture', ['#6f7f63', '#746957', '#4f3a35', '#8a7d5e'], 128, 0.36), 1.8, 1.8),
       boulder: makeAssetTexture('boulder_diff.jpg', rock, 2, 2),
       rockMoss: makeAssetTexture('rock_moss_diff.jpg', rock, 2, 2),
       rockyTerrain: makeAssetTexture('rocky_terrain_diff.jpg', soil, 5, 5),
@@ -751,17 +775,41 @@ function makeOutfitInstance(template: THREE.Group, role: OutfitRole) {
     part.material = cloneMaterial(part.material);
     const materials = Array.isArray(part.material) ? part.material : [part.material];
     for (const material of materials) {
-      if (role === 'enemy' && material instanceof THREE.MeshStandardMaterial) {
-        material.color.multiplyScalar(0.58);
-        material.emissive.setHex(0x25120f);
-        material.emissiveIntensity = 0.18;
-        material.roughness = Math.min(1, material.roughness + 0.16);
-      } else if (role === 'npc' && material instanceof THREE.MeshStandardMaterial) {
-        material.color.multiplyScalar(1.08);
-        material.roughness = Math.min(1, material.roughness + 0.08);
+      if (material instanceof THREE.MeshStandardMaterial) {
+        material.envMapIntensity = role === 'player' ? 0.72 : 0.48;
+        material.roughness = clamp(material.roughness, 0.34, 0.92);
+        if (material.normalMap) material.normalScale.set(0.82, 0.82);
+        if (material.map) material.map.anisotropy = 8;
+        if (role === 'enemy') {
+          material.color.multiplyScalar(0.48);
+          material.color.offsetHSL(-0.02, 0.08, -0.06);
+          material.emissive.setHex(0x35120f);
+          material.emissiveIntensity = 0.22;
+          material.roughness = Math.min(1, material.roughness + 0.18);
+        } else if (role === 'npc') {
+          material.color.multiplyScalar(1.06);
+          material.roughness = Math.min(1, material.roughness + 0.06);
+        } else {
+          material.color.multiplyScalar(1.18);
+          material.metalness = Math.min(0.2, material.metalness + 0.04);
+          material.transparent = true;
+          material.opacity = 0.72;
+          material.depthWrite = false;
+        }
       }
     }
   });
+  outfit.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(outfit);
+  const size = bounds.getSize(new THREE.Vector3());
+  if (Number.isFinite(size.y) && size.y > 0.01) {
+    const targetHeight = role === 'player' ? 1.82 : role === 'enemy' ? 2.62 : 2.58;
+    const scale = clamp(targetHeight / size.y, 0.018, 1.45);
+    outfit.scale.multiplyScalar(scale);
+    outfit.updateMatrixWorld(true);
+    const scaledBounds = new THREE.Box3().setFromObject(outfit);
+    outfit.userData.groundLift = -scaledBounds.min.y;
+  }
   outfit.name = role === 'player' ? 'Player Outfit' : role === 'enemy' ? 'Infected Outfit' : 'Village NPC Outfit';
   return outfit;
 }
@@ -1349,9 +1397,9 @@ function makeDryTree() {
 function makeForestTree() {
   const group = new THREE.Group();
   const textures = worldTextures();
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a412d, map: textures.islandBark, bumpMap: textures.bark, bumpScale: 0.08, roughness: 0.92 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2f6b3f, map: textures.islandLeaves, bumpMap: textures.leaves, bumpScale: 0.035, roughness: 0.88 });
-  const darkLeafMat = new THREE.MeshStandardMaterial({ color: 0x244f34, map: textures.islandLeaves, bumpMap: textures.leaves, bumpScale: 0.035, roughness: 0.9 });
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7a573a, map: textures.islandBark, bumpMap: textures.bark, bumpScale: 0.08, roughness: 0.88 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x6ca968, map: textures.islandLeaves, bumpMap: textures.leaves, bumpScale: 0.045, roughness: 0.78 });
+  const darkLeafMat = new THREE.MeshStandardMaterial({ color: 0x497a4d, map: textures.islandLeaves, bumpMap: textures.leaves, bumpScale: 0.04, roughness: 0.84 });
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.32, 3.4, 8), trunkMat);
   trunk.position.y = 1.7;
   trunk.castShadow = true;
@@ -1363,15 +1411,22 @@ function makeForestTree() {
     crown.castShadow = true;
     group.add(crown);
   }
+  for (let i = 0; i < 5; i++) {
+    const cluster = new THREE.Mesh(new THREE.DodecahedronGeometry(randomRange(0.34, 0.58), 1), i % 2 === 0 ? leafMat : darkLeafMat);
+    cluster.position.set(randomRange(-0.78, 0.78), randomRange(2.55, 4.25), randomRange(-0.68, 0.68));
+    cluster.scale.set(randomRange(1.0, 1.55), randomRange(0.72, 1.05), randomRange(1.0, 1.45));
+    cluster.castShadow = true;
+    group.add(cluster);
+  }
   return group;
 }
 
 function makeJacarandaTree() {
   const group = new THREE.Group();
   const textures = worldTextures();
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x57402f, map: textures.islandBark, bumpMap: textures.bark, bumpScale: 0.08, roughness: 0.92 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x7c6cc8, map: textures.islandLeaves, bumpMap: textures.leaves, bumpScale: 0.028, roughness: 0.86 });
-  const bloomMat = new THREE.MeshStandardMaterial({ color: 0xb698ff, emissive: 0x35215f, emissiveIntensity: 0.08, roughness: 0.74 });
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x73543c, map: textures.islandBark, bumpMap: textures.bark, bumpScale: 0.08, roughness: 0.88 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x9b86dd, map: textures.islandLeaves, bumpMap: textures.leaves, bumpScale: 0.028, roughness: 0.78 });
+  const bloomMat = new THREE.MeshStandardMaterial({ color: 0xc6a8ff, emissive: 0x5a3f91, emissiveIntensity: 0.12, roughness: 0.7 });
 
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.34, 3.2, 8), trunkMat);
   trunk.position.y = 1.6;
@@ -1458,6 +1513,7 @@ function makeRiverSegment(size: number) {
 }
 
 function makeGroundShaderMaterial(seed = 0) {
+  const textures = worldTextures();
   return new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
@@ -1465,6 +1521,9 @@ function makeGroundShaderMaterial(seed = 0) {
       uFogNear: { value: 95 },
       uFogFar: { value: 340 },
       uFogColor: { value: new THREE.Color(0x9fb7c9) },
+      uGrassTex: { value: textures.grass },
+      uSoilTex: { value: textures.rockyTerrain },
+      uRockTex: { value: textures.rockMoss },
     },
     vertexShader: `
       varying vec2 vUv;
@@ -1488,6 +1547,9 @@ function makeGroundShaderMaterial(seed = 0) {
       uniform float uFogNear;
       uniform float uFogFar;
       uniform vec3 uFogColor;
+      uniform sampler2D uGrassTex;
+      uniform sampler2D uSoilTex;
+      uniform sampler2D uRockTex;
       varying vec2 vUv;
       varying vec3 vWorld;
       varying float vHeight;
@@ -1510,21 +1572,26 @@ function makeGroundShaderMaterial(seed = 0) {
         float grit = noise(vWorld.xz * 1.35 + uSeed * 0.17);
         float blades = noise(vec2(vWorld.x * 0.82, vWorld.z * 3.4));
         float pebble = smoothstep(0.88, 0.985, noise(vWorld.xz * 2.15 + 19.0));
-        vec3 grass = vec3(0.29, 0.42, 0.22);
-        vec3 dry = vec3(0.56, 0.49, 0.30);
-        vec3 damp = vec3(0.18, 0.28, 0.22);
-        vec3 rock = vec3(0.38, 0.39, 0.34);
+        vec2 worldUv = vWorld.xz * 0.055;
+        vec3 grassTex = texture2D(uGrassTex, worldUv * 1.8).rgb;
+        vec3 soilTex = texture2D(uSoilTex, worldUv * 1.25 + vec2(0.17, 0.31)).rgb;
+        vec3 rockTex = texture2D(uRockTex, worldUv * 1.55 + vec2(0.43, 0.08)).rgb;
+        vec3 grass = mix(vec3(0.22, 0.36, 0.18), grassTex * vec3(0.72, 0.9, 0.6), 0.68);
+        vec3 dry = mix(vec3(0.62, 0.52, 0.29), soilTex * vec3(0.96, 0.84, 0.58), 0.74);
+        vec3 damp = mix(vec3(0.17, 0.28, 0.21), grassTex * vec3(0.42, 0.58, 0.42), 0.45);
+        vec3 rock = mix(vec3(0.42, 0.42, 0.35), rockTex * vec3(0.86, 0.88, 0.78), 0.72);
         vec3 color = mix(dry, grass, smoothstep(0.22, 0.78, n));
         color = mix(color, damp, smoothstep(0.72, 0.95, fine) * 0.38);
         color = mix(color, rock, smoothstep(0.58, 1.05, abs(vHeight)));
-        color += (grit - 0.5) * 0.12;
-        color = mix(color, color + vec3(0.08, 0.11, 0.03), smoothstep(0.5, 0.86, blades) * 0.22);
+        color += (grit - 0.5) * 0.2;
+        color = mix(color, color + vec3(0.12, 0.16, 0.04), smoothstep(0.5, 0.86, blades) * 0.3);
         color = mix(color, vec3(0.28, 0.27, 0.23), pebble * 0.42);
         float light = 0.78 + 0.22 * smoothstep(-0.35, 0.55, vHeight);
         color *= light;
         float dist = length(cameraPosition.xz - vWorld.xz);
         float fog = smoothstep(uFogNear, uFogFar, dist);
-        gl_FragColor = vec4(mix(color, uFogColor, fog * 0.72), 1.0);
+        color = pow(max(color, vec3(0.0)), vec3(0.92));
+        gl_FragColor = vec4(mix(color, uFogColor, fog * 0.62), 1.0);
       }
     `,
   });
@@ -1560,15 +1627,16 @@ function makeWaterShaderMaterial() {
         float fineRipple = sin(vWorld.x * 0.9 + uTime * 4.8) * sin(vWorld.z * 0.7 - uTime * 3.1);
         float shine = smoothstep(0.68, 0.98, ripple);
         float foam = smoothstep(0.02, 0.09, min(vUv.y, 1.0 - vUv.y)) * (1.0 - smoothstep(0.09, 0.18, min(vUv.y, 1.0 - vUv.y)));
-        vec3 deep = vec3(0.08, 0.32, 0.38);
-        vec3 shallow = vec3(0.18, 0.56, 0.65);
+        vec3 deep = vec3(0.06, 0.36, 0.48);
+        vec3 shallow = vec3(0.18, 0.68, 0.78);
         vec3 color = mix(deep, shallow, vUv.y);
         color += shine * vec3(0.45, 0.72, 0.78);
         color += fineRipple * vec3(0.025, 0.055, 0.06);
         color = mix(color, vec3(0.72, 0.92, 0.9), foam * 0.34);
         float dist = length(cameraPosition.xz - vWorld.xz);
         float fog = smoothstep(120.0, 360.0, dist);
-        gl_FragColor = vec4(mix(color, uFogColor, fog * 0.52), 0.78);
+        color = pow(max(color, vec3(0.0)), vec3(0.88));
+        gl_FragColor = vec4(mix(color, uFogColor, fog * 0.42), 0.82);
       }
     `,
   });
@@ -1581,8 +1649,8 @@ function makeSkyDome() {
       side: THREE.BackSide,
       depthWrite: false,
       uniforms: {
-        uTop: { value: new THREE.Color(0x5f8aa8) },
-        uHorizon: { value: new THREE.Color(0xd8c89b) },
+        uTop: { value: new THREE.Color(0x6ea7c5) },
+        uHorizon: { value: new THREE.Color(0xf0d79b) },
         uNight: { value: new THREE.Color(0x16252f) },
         uMix: { value: 0 },
       },
@@ -1901,6 +1969,7 @@ function makeHouse(mood: NpcMood) {
   windowB.position.set(2.4, 2.35, -3.64);
 
   const beamMat = new THREE.MeshStandardMaterial({ color: 0x372417, map: textures.bark, bumpMap: textures.bark, bumpScale: 0.045, roughness: 0.88 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x22150d, map: textures.bark, bumpMap: textures.bark, bumpScale: 0.04, roughness: 0.82 });
   for (const x of [-3.75, 3.75]) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.28, 4.55, 0.24), beamMat);
     post.position.set(x, 2.28, -3.64);
@@ -1913,6 +1982,37 @@ function makeHouse(mood: NpcMood) {
     beam.castShadow = true;
     group.add(beam);
   }
+  for (const x of [-2.4, 2.4]) {
+    const frameTop = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.14, 0.18), trimMat);
+    const frameBottom = frameTop.clone();
+    const frameLeft = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.96, 0.18), trimMat);
+    const frameRight = frameLeft.clone();
+    frameTop.position.set(x, 2.8, -3.73);
+    frameBottom.position.set(x, 1.9, -3.73);
+    frameLeft.position.set(x - 0.66, 2.35, -3.73);
+    frameRight.position.set(x + 0.66, 2.35, -3.73);
+    const shutterL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.95, 0.16), trimMat);
+    const shutterR = shutterL.clone();
+    shutterL.position.set(x - 0.92, 2.35, -3.76);
+    shutterR.position.set(x + 0.92, 2.35, -3.76);
+    group.add(frameTop, frameBottom, frameLeft, frameRight, shutterL, shutterR);
+  }
+  const roofRidge = new THREE.Mesh(new THREE.BoxGeometry(7.25, 0.2, 0.22), trimMat);
+  roofRidge.position.set(0, 6.86, 0);
+  roofRidge.rotation.y = Math.PI / 4;
+  roofRidge.castShadow = true;
+  const lantern = new THREE.Mesh(
+    new THREE.BoxGeometry(0.34, 0.46, 0.2),
+    new THREE.MeshBasicMaterial({ color: mood === 'evil' ? 0xff5b40 : 0xffcf72 }),
+  );
+  lantern.position.set(0, 2.18, -3.78);
+  const smokeMat = new THREE.MeshBasicMaterial({ color: 0x9aa2a3, transparent: true, opacity: 0.22, depthWrite: false });
+  for (let i = 0; i < 3; i++) {
+    const smoke = new THREE.Mesh(new THREE.SphereGeometry(0.34 + i * 0.11, 10, 8), smokeMat);
+    smoke.position.set(2.35 + i * 0.12, 7.05 + i * 0.42, 0.72 - i * 0.04);
+    smoke.scale.set(1.2 + i * 0.2, 0.72, 1);
+    group.add(smoke);
+  }
   const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.68, 1.55, 0.68), new THREE.MeshStandardMaterial({ color: 0x5c4a3c, map: textures.rockyTerrain, roughness: 0.9 }));
   chimney.position.set(2.35, 6.15, 0.72);
   chimney.castShadow = true;
@@ -1921,7 +2021,7 @@ function makeHouse(mood: NpcMood) {
   steps.castShadow = true;
   steps.receiveShadow = true;
 
-  group.add(wall, roof, door, windowA, windowB, chimney, steps);
+  group.add(wall, roof, door, windowA, windowB, roofRidge, lantern, chimney, steps);
   return group;
 }
 
@@ -2084,7 +2184,7 @@ function makeWorldChunk(cx: number, cz: number) {
   ground.receiveShadow = true;
   group.add(ground);
 
-  const grassCount = terrainRoll > 0.72 ? 32 : terrainRoll > 0.38 ? 56 : 44;
+  const grassCount = terrainRoll > 0.72 ? 72 : terrainRoll > 0.38 ? 128 : 96;
   group.add(makeSteppeGrassPatch(cx, cz, grassCount));
 
   const riverBand = Math.abs(Math.sin(cx * 0.62 + cz * 0.38)) < 0.18;
@@ -2198,7 +2298,7 @@ function makeWorldChunk(cx: number, cz: number) {
     group.add(pistolCache);
   }
 
-  const detailCount = 5 + Math.floor(hash2(cx, cz, 540) * 7);
+  const detailCount = 10 + Math.floor(hash2(cx, cz, 540) * 12);
   for (let i = 0; i < detailCount; i++) {
     const detail = makeDetailPatch(i + cx * 17 + cz * 31);
     detail.position.set(chunkRandom(cx, cz, i + 560, -42, 42), 0, chunkRandom(cx, cz, i + 590, -42, 42));
@@ -2369,17 +2469,17 @@ function dayPhaseAt(dayTime: number): DayPhase {
 }
 
 function dayPhaseLabel(phase: DayPhase) {
-  if (phase === 'dawn') return 'Dawn';
-  if (phase === 'day') return 'Day';
-  if (phase === 'dusk') return 'Dusk';
-  return 'Night';
+  if (phase === 'dawn') return 'Рассвет';
+  if (phase === 'day') return 'День';
+  if (phase === 'dusk') return 'Закат';
+  return 'Ночь';
 }
 
 function walkModeLabel(mode: WalkMode) {
-  if (mode === 'sneak') return 'Silent';
-  if (mode === 'sprint') return 'Sprint';
-  if (mode === 'tired') return 'Tired';
-  return 'Walk';
+  if (mode === 'sneak') return 'Тихо';
+  if (mode === 'sprint') return 'Бег';
+  if (mode === 'tired') return 'Устал';
+  return 'Шаг';
 }
 
 function createDynamicMusic() {
@@ -2514,8 +2614,13 @@ function playJumpscareSfx() {
 }
 
 export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () => void }) {
+  const isMobile = useMobileLayout();
+  const isPortrait = usePortraitLayout();
   const mountRef = useRef<HTMLDivElement>(null);
   const keysRef = useRef(new Set<string>());
+  const virtualAttackRef = useRef<() => void>(() => {});
+  const virtualUseItemRef = useRef<() => void>(() => {});
+  const virtualTeleportRef = useRef<() => void>(() => {});
   const playerRef = useRef(new THREE.Vector3(0, 0, START_Z));
   const playerVelocityRef = useRef(new THREE.Vector3());
   const aimRef = useRef(new THREE.Vector2(0, -1));
@@ -2537,7 +2642,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
   const codeRef = useRef<QuestItem>(randomQuestPoint());
   const hpRef = useRef(100);
   const scoreRef = useRef(0);
-  const dayTimeRef = useRef(0.24);
+  const dayTimeRef = useRef(0.13);
   const staminaRef = useRef(STAMINA_MAX);
   const walkModeRef = useRef<WalkMode>('walk');
   const storyFlagsRef = useRef<StoryFlags>({ trust: 0, lore: 0, risk: 0, cruelty: 0 });
@@ -2870,8 +2975,8 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     const balance = DIFFICULTY[difficultyRef.current];
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x9fb7c9);
-    scene.fog = new THREE.Fog(0x9fb7c9, 55, 410);
+    scene.background = new THREE.Color(0xa8c9d4);
+    scene.fog = new THREE.Fog(0xa8c9d4, 72, 460);
 
     const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -2879,9 +2984,10 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.92;
+    renderer.toneMappingExposure = 1.18;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.domElement.style.filter = 'saturate(1.2) contrast(1.04) brightness(1.08)';
     mount.appendChild(renderer.domElement);
 
     const shaderMaterials = new Set<THREE.ShaderMaterial>();
@@ -2895,9 +3001,9 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     scene.add(skyDome);
     trackShaders(skyDome);
 
-    const hemi = new THREE.HemisphereLight(0xd7e8ff, 0x3a432d, 0.74);
+    const hemi = new THREE.HemisphereLight(0xf4fbff, 0x74815a, 1.42);
     scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xffd09a, 4.35);
+    const sun = new THREE.DirectionalLight(0xffd39a, 3.75);
     sun.position.set(-44, 58, 28);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -2909,7 +3015,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     sun.shadow.camera.bottom = -230;
     scene.add(sun);
     scene.add(sun.target);
-    const rimLight = new THREE.DirectionalLight(0x8ccfff, 0.95);
+    const rimLight = new THREE.DirectionalLight(0xa7e8ff, 1.72);
     rimLight.position.set(38, 26, -42);
     scene.add(rimLight);
     const fireGlow = new THREE.PointLight(0xff9b48, 1.6, 42, 1.8);
@@ -2938,12 +3044,25 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     scene.add(ground);
     trackShaders(ground);
 
+    const pathTexture = makeProceduralTexture('sun baked steppe trail', ['#9f7a3d', '#b18b4d', '#7d5f31', '#c49b5b', '#6b542d'], 192, 0.42);
+    pathTexture.wrapS = THREE.RepeatWrapping;
+    pathTexture.wrapT = THREE.RepeatWrapping;
+    pathTexture.repeat.set(2.1, 44);
     const path = new THREE.Mesh(
       new THREE.PlaneGeometry(22, START_Z - FINISH_Z + 80),
-      new THREE.MeshStandardMaterial({ color: 0x6d7440, map: worldTextures().soil, bumpMap: worldTextures().soil, bumpScale: 0.035, roughness: 0.96 }),
+      new THREE.MeshStandardMaterial({
+        color: 0xffcf84,
+        map: pathTexture,
+        emissive: 0x6f4617,
+        emissiveIntensity: 0.34,
+        roughness: 0.88,
+        metalness: 0,
+        side: THREE.DoubleSide,
+      }),
     );
     path.rotation.x = -Math.PI / 2;
     path.position.set(0, 0.02, (START_Z + FINISH_Z) / 2 - 10);
+    path.receiveShadow = false;
     scene.add(path);
 
     const dustMat = new THREE.MeshStandardMaterial({ color: 0x8a7a4c, map: worldTextures().soil, bumpMap: worldTextures().soil, bumpScale: 0.026, roughness: 0.98 });
@@ -3203,12 +3322,10 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     const gltfLoader = new GLTFLoader();
     const textureLoader = new THREE.TextureLoader();
     let stopped = false;
-    const assetLoadTotal =
-      Object.keys(OUTFIT_URLS).length +
-      Object.keys(MEDIEVAL_PROP_URLS).length +
-      Object.keys(MEDIEVAL_EXTRA_PROP_URLS).length +
-      GAME_LOADING_TEXTURE_FILES.length +
-      1;
+    const assetLoadTotal = Math.max(1,
+      (USE_CHARACTER_RUNTIME_ASSETS ? Object.keys(OUTFIT_URLS).length + 1 : 0) +
+      (USE_WORLD_RUNTIME_ASSETS ? Object.keys(MEDIEVAL_PROP_URLS).length + Object.keys(MEDIEVAL_EXTRA_PROP_URLS).length + GAME_LOADING_TEXTURE_FILES.length : 0),
+    );
     let assetLoadDone = 0;
     const markAssetReady = (label: string) => {
       if (stopped) return;
@@ -3222,15 +3339,15 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         }, 450);
       }
     };
-    if (!USE_HEAVY_RUNTIME_ASSETS) {
+    if (!USE_CHARACTER_RUNTIME_ASSETS && !USE_WORLD_RUNTIME_ASSETS) {
       setAssetLoadingProgress(100);
-      setAssetLoadingLabel('Легкий режим: тяжелые 4K ассеты оставлены в ZIP и не грузятся в браузер.');
+      setAssetLoadingLabel('Легкий режим: кинематографичные fallback-модели готовы.');
       window.setTimeout(() => {
         if (!stopped) setAssetLoading(false);
       }, 250);
     }
     for (const file of GAME_LOADING_TEXTURE_FILES) {
-      if (!USE_HEAVY_RUNTIME_ASSETS) break;
+      if (!USE_WORLD_RUNTIME_ASSETS) break;
       textureLoader.load(
         assetPath(file),
         () => markAssetReady(`Текстура загружена: ${file}`),
@@ -3249,8 +3366,8 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     let companionAnimator: CharacterAnimator | undefined;
     let animationGuide: THREE.Group | null = null;
     const playerOutfitKind = PLAYER_OUTFIT_BY_DIFFICULTY[difficultyRef.current];
-    const loadGltf = (url: string, onLoad: (gltf: GLTF) => void, onError: () => void, attempt = 0) => {
-      if (!USE_HEAVY_RUNTIME_ASSETS) return;
+    const loadGltf = (url: string, onLoad: (gltf: GLTF) => void, onError: () => void, attempt = 0, enabled = USE_WORLD_RUNTIME_ASSETS) => {
+      if (!enabled) return;
       gltfLoader.load(
         url,
         onLoad,
@@ -3258,7 +3375,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         () => {
           if (stopped) return;
           if (attempt < 2) {
-            window.setTimeout(() => loadGltf(url, onLoad, onError, attempt + 1), 450 * (attempt + 1));
+            window.setTimeout(() => loadGltf(url, onLoad, onError, attempt + 1, enabled), 450 * (attempt + 1));
             return;
           }
           onError();
@@ -3275,16 +3392,13 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       }
     };
     const attachPlayerOutfit = (template: THREE.Group) => {
+      void template;
       if (outfitModel) return;
-      outfitModel = makeOutfitInstance(template, 'player');
-      outfitModel.position.set(0, -0.08, 0.04);
-      outfitModel.rotation.y = Math.PI;
-      player.add(outfitModel);
+      // The marketplace outfit meshes include wide cloak/card shapes that can cover
+      // the third-person camera. Keep the stable runtime player and use imported
+      // animated outfits for NPCs, enemies and the companion instead.
+      outfitModel = runtimePlayerOutfit.mesh;
       attachPlayerAnimator();
-
-      for (const part of player.children) {
-        if (part !== outfitModel && part !== hloodAura && part !== heldWeaponModel) part.visible = false;
-      }
     };
     const attachBestLoadedPlayerOutfit = () => {
       const template =
@@ -3323,7 +3437,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
 
       const mesh = new THREE.Group();
       const outfit = makeOutfitInstance(template, 'enemy');
-      outfit.position.set(0, -0.08, 0.04);
+      outfit.position.set(0, -0.08 + (Number(outfit.userData.groundLift) || 0), 0.04);
       outfit.rotation.y = Math.PI;
       mesh.add(outfit);
       mesh.userData.outfitEnemy = true;
@@ -3357,7 +3471,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       }
       const mesh = new THREE.Group();
       const outfit = makeOutfitInstance(template, 'npc');
-      outfit.position.set(0, -0.08, 0.04);
+      outfit.position.set(0, -0.08 + (Number(outfit.userData.groundLift) || 0), 0.04);
       outfit.rotation.y = Math.PI;
       mesh.add(outfit);
       mesh.userData.outfitNpc = true;
@@ -3376,7 +3490,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       const mesh = new THREE.Group();
       const runtimeFallback = template ? null : makeRuntimeOutfit('malePeasant', 'npc', 'good');
       const root = template ? makeOutfitInstance(template, 'npc') : runtimeFallback!.mesh;
-      root.position.set(0, -0.08, 0.04);
+      root.position.set(0, -0.08 + (Number(root.userData.groundLift) || 0), 0.04);
       root.rotation.y = Math.PI;
       mesh.add(root);
       mesh.userData.outfitCompanion = !!template;
@@ -3585,6 +3699,8 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
           setHud((h) => ({ ...h, hint: hintRef.current }));
           markAssetReady(`Персонаж пропущен: ${kind}`);
         },
+        0,
+        USE_CHARACTER_RUNTIME_ASSETS,
       );
     }
 
@@ -3655,9 +3771,12 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         }
       },
       () => {
-        hintRef.current = 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ Universal Animation Library.';
+        hintRef.current = 'Не удалось загрузить Universal Animation Library, игра продолжит с fallback-анимацией.';
         setHud((h) => ({ ...h, hint: hintRef.current }));
+        markAssetReady('Анимации персонажей пропущены');
       },
+      0,
+      USE_CHARACTER_RUNTIME_ASSETS,
     );
     window.setTimeout(() => {
       if (stopped) return;
@@ -3916,6 +4035,10 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       setHud((h) => ({ ...h, hp: Math.ceil(hpRef.current), inventory: [...inventoryRef.current], hint: hintRef.current }));
     };
 
+    virtualAttackRef.current = attack;
+    virtualUseItemRef.current = useSelectedItem;
+    virtualTeleportRef.current = teleportToHloddev;
+
     void useMedkit;
 
     const keyDown = (e: KeyboardEvent) => {
@@ -3968,7 +4091,8 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     const pointerLockChange = () => {
       renderer.domElement.style.cursor = document.pointerLockElement === renderer.domElement ? 'none' : '';
     };
-    const pointerDown = () => {
+    const pointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('button')) return;
       renderer.domElement.focus();
       attack();
     };
@@ -4371,7 +4495,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       const sunLift = Math.max(0, Math.sin(dayAngle));
       const moonLift = Math.max(0, -Math.sin(dayAngle));
       const daylight = clamp(0.12 + sunLift * 0.88, 0.12, 1);
-      renderer.toneMappingExposure = inHloddev ? 0.86 : 0.58 + daylight * 0.5;
+      renderer.toneMappingExposure = inHloddev ? 0.98 : 0.82 + daylight * 0.56;
       hemi.intensity = inHloddev ? 0.72 : 0.22 + daylight * 0.72;
       sun.intensity = inHloddev ? 2.7 : 0.45 + daylight * 4.3;
       rimLight.intensity = inHloddev ? 1.05 : 0.42 + moonLift * 1.15;
@@ -4383,7 +4507,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
           ? 0x9fd7bd
           : activeVision === 'whiteout'
             ? 0xe8edf0
-            : inHloddev ? 0x86dff2 : dayPhase === 'night' ? 0x182238 : dayPhase === 'dusk' ? 0x8e6b63 : dayPhase === 'dawn' ? 0xb08f76 : 0x9fb7c9;
+            : inHloddev ? 0x86dff2 : dayPhase === 'night' ? 0x182238 : dayPhase === 'dusk' ? 0xa07864 : dayPhase === 'dawn' ? 0xc39a73 : 0xa8c9d4;
       scene.background = new THREE.Color(fogColor);
       scene.fog = new THREE.Fog(
         fogColor,
@@ -4420,9 +4544,9 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       const followRight = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw));
       const speedSway = Math.min(1, currentSpeed / PLAYER_SPEED);
       const camBob = Math.sin(playerWalkTime * 0.65) * 0.18 * speedSway;
-      const shoulder = inHloddev ? 1.45 : 1.15;
-      const cameraDistance = inHloddev ? 11.5 : activeEvent === 'storm' ? 12.5 : 13.8;
-      const cameraHeight = inHloddev ? 6.7 : activeEvent === 'storm' ? 6.4 : 7.4;
+      const shoulder = inHloddev ? 1.65 : 1.35;
+      const cameraDistance = inHloddev ? 10.5 : activeEvent === 'storm' ? 11.5 : 12.5;
+      const cameraHeight = inHloddev ? 6.9 : activeEvent === 'storm' ? 6.4 : 7.1;
       const desiredCamera = cameraTarget
         .clone()
         .addScaledVector(followForward, -cameraDistance - speedSway * 1.35)
@@ -4432,8 +4556,8 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         desiredCamera,
         clamp(dt * 5.2, 0.04, 0.16),
       );
-      const lookAhead = cameraTarget.clone().addScaledVector(followForward, 7.2 + speedSway * 3.2);
-      camera.lookAt(lookAhead.x, lookAhead.y + 1.6 + cameraPitch * 5.6, lookAhead.z);
+      const lookAhead = cameraTarget.clone().addScaledVector(followForward, 9.5 + speedSway * 3.1);
+      camera.lookAt(lookAhead.x, lookAhead.y + 1.9 + cameraPitch * 4.6, lookAhead.z);
 
       const distance = Math.max(0, Math.round(((playerRef.current.z - FINISH_Z) / (START_Z - FINISH_Z)) * 100));
       setHud({
@@ -4515,6 +4639,9 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       if (document.pointerLockElement === renderer.domElement) document.exitPointerLock?.();
       music?.stop();
       keysRef.current.clear();
+      virtualAttackRef.current = () => {};
+      virtualUseItemRef.current = () => {};
+      virtualTeleportRef.current = () => {};
       renderer.dispose();
       mount.innerHTML = '';
     };
@@ -4532,20 +4659,51 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     setPhase('tutorial');
   };
 
+  const requestLandscapeMode = async () => {
+    if (!isMobile) return;
+    try {
+      await document.documentElement.requestFullscreen?.();
+    } catch {
+      // Some mobile browsers only allow orientation hints, not fullscreen.
+    }
+    try {
+      await (window.screen.orientation as LockableScreenOrientation | undefined)?.lock?.('landscape');
+    } catch {
+      // Fallback is the in-game rotate-phone overlay.
+    }
+  };
+
+  const releaseLandscapeMode = async () => {
+    if (!isMobile) return;
+    try {
+      (window.screen.orientation as LockableScreenOrientation | undefined)?.unlock?.();
+    } catch {
+      // Ignore browsers without orientation unlock.
+    }
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen?.();
+    } catch {
+      // Ignore fullscreen exit failures.
+    }
+  };
+
   const handleMainPlay = () => {
     if (phase === 'intro') {
       openTutorial();
       return;
     }
     if (phase === 'tutorial') {
+      void requestLandscapeMode();
       start(!!savedGameState);
       return;
     }
     setSavedGameState(null);
+    void requestLandscapeMode();
     start(false);
   };
 
   const exit = () => {
+    void releaseLandscapeMode();
     setPhase('intro');
     onExit?.();
   };
@@ -4773,8 +4931,51 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     }));
   };
 
+  const rootStyle = {
+    ...styles.root,
+    ...(isMobile && phase !== 'playing' ? styles.rootMobileMenu : null),
+    ...(isMobile && phase === 'playing' ? styles.rootMobilePlaying : null),
+  };
+  const panelStyle = {
+    ...styles.panel,
+    ...(isMobile ? styles.panelMobile : null),
+  };
+  const pressVirtualKey = (key: string, pressed: boolean) => {
+    if (pressed) keysRef.current.add(key);
+    else keysRef.current.delete(key);
+  };
+  const virtualKeyProps = (key: string) => ({
+    onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      pressVirtualKey(key, true);
+    },
+    onPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      pressVirtualKey(key, false);
+    },
+    onPointerCancel: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      pressVirtualKey(key, false);
+    },
+    onPointerLeave: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      pressVirtualKey(key, false);
+    },
+  });
+  const tapActionProps = (action: () => void) => ({
+    onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      action();
+    },
+  });
+
   return (
-    <div style={styles.root}>
+    <div style={rootStyle}>
       <style>
         {`
           @keyframes qasqyrCaseShake {
@@ -4802,6 +5003,15 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
         `}
       </style>
       {phase === 'playing' && <div ref={mountRef} style={styles.mount} />}
+      {phase === 'playing' && <div style={styles.cinematicGrade} />}
+      {phase !== 'playing' && <div style={styles.menuBackdrop} />}
+      {phase === 'playing' && isMobile && isPortrait && (
+        <div style={styles.orientationOverlay}>
+          <div style={styles.orientationPhone}>↻</div>
+          <b>Поверни телефон горизонтально</b>
+          <span>QASQYR 3D лучше играть в landscape: карта шире, кнопки не закрывают обзор.</span>
+        </div>
+      )}
       {phase === 'won' && <ZombieCongratsPhoto score={hud.score} />}
       {phase === 'playing' && assetLoading && (
         <div style={styles.loadingOverlay}>
@@ -4820,26 +5030,28 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
 
       {phase === 'playing' && (
         <>
-          <button
-            type="button"
-            style={styles.focusControl}
-            onClick={() => {
-              mountRef.current?.querySelector('canvas')?.requestPointerLock?.();
-            }}
-          >
-            WASD move · click to focus
-          </button>
-          <div style={styles.hud}>
-            <div style={styles.stat}><b>HP</b><span>{hud.hp}</span></div>
-            <div style={styles.stat}><b>Time</b><span>{hud.timeOfDay}</span></div>
-            <div style={styles.stat}><b>Move</b><span>{hud.walkMode}</span></div>
-            <div style={styles.stat}><b>Stamina</b><span>{hud.stamina}</span></div>
-            <div style={styles.stat}><b>Difficulty</b><span>{hud.difficulty}</span></div>
-            <div style={styles.stat}><b>Story</b><span>{hud.story}</span></div>
+          {!isMobile && (
+            <button
+              type="button"
+              style={styles.focusControl}
+              onClick={() => {
+                mountRef.current?.querySelector('canvas')?.requestPointerLock?.();
+              }}
+            >
+              WASD · фокус мыши
+            </button>
+          )}
+          <div style={{ ...styles.hud, ...(isMobile ? styles.hudMobile : null) }}>
+            <div style={styles.stat}><b>Здоровье</b><span>{hud.hp}</span></div>
+            <div style={styles.stat}><b>Время</b><span>{hud.timeOfDay}</span></div>
+            <div style={styles.stat}><b>Ход</b><span>{hud.walkMode}</span></div>
+            <div style={styles.stat}><b>Выносливость</b><span>{hud.stamina}</span></div>
+            <div style={styles.stat}><b>Режим</b><span>{hud.difficulty}</span></div>
+            <div style={styles.stat}><b>Сюжет</b><span>{hud.story}</span></div>
             <div style={styles.stat}><b>Очки</b><span>{hud.score}</span></div>
             <div style={styles.stat}><b>Оружие</b><span>{hud.weapon}</span></div>
             <div style={styles.stat}><b>Измерение</b><span>{hud.dimensionLeft > 0 ? `${hud.dimension} ${hud.dimensionLeft}с` : hud.dimension}</span></div>
-            <div style={styles.stat}><b>Space</b><span>{hud.teleport > 0 ? `${hud.teleport}с` : 'Хлоддев'}</span></div>
+            <div style={styles.stat}><b>Хлоддев</b><span>{hud.teleport > 0 ? `${hud.teleport}с` : 'готов'}</span></div>
             <div style={styles.stat}><b>{hud.event || 'Ивент'}</b><span>{hud.event ? `${hud.eventLeft}с` : `${hud.nextEvent}с`}</span></div>
             <button type="button" onClick={askGeminiHint} disabled={aiThinking} style={styles.aiButton}>
               {aiThinking ? 'Gemini...' : 'Gemini 2.5'}
@@ -4847,7 +5059,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
             <div style={styles.hint}>{hud.hint}</div>
           </div>
 
-          <div style={styles.questPanel}>
+          <div style={{ ...styles.questPanel, ...(isMobile ? styles.questPanelMobile : null) }}>
             <QuestArrow label="Ключ" done={hud.hasKey} nav={hud.keyNav} />
             <QuestArrow label="Код" done={hud.hasCode} nav={hud.codeNav} />
             {!hud.coordsBought && <QuestArrow label="Торговец" done={false} nav={hud.traderNav} />}
@@ -4857,7 +5069,23 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
             <div style={styles.fortressDistance}>Крепость: {hud.distance}% пути</div>
           </div>
 
-          <InventoryPanel items={hud.inventory} selectedSlot={hud.selectedSlot} />
+          {!isMobile && <InventoryPanel items={hud.inventory} selectedSlot={hud.selectedSlot} />}
+          {isMobile && (
+            <div style={styles.mobileControls}>
+              <div style={styles.mobileMovePad}>
+                <button type="button" style={{ ...styles.mobilePadButton, gridColumn: 2 }} {...virtualKeyProps('w')}>↑</button>
+                <button type="button" style={{ ...styles.mobilePadButton, gridColumn: 1, gridRow: 2 }} {...virtualKeyProps('a')}>←</button>
+                <button type="button" style={{ ...styles.mobilePadButton, gridColumn: 2, gridRow: 2 }} {...virtualKeyProps('s')}>↓</button>
+                <button type="button" style={{ ...styles.mobilePadButton, gridColumn: 3, gridRow: 2 }} {...virtualKeyProps('d')}>→</button>
+              </div>
+              <div style={styles.mobileActionPad}>
+                <button type="button" style={styles.mobileActionButton} {...tapActionProps(() => virtualAttackRef.current())}>Удар</button>
+                <button type="button" style={styles.mobileActionButton} {...virtualKeyProps('shift')}>Бег</button>
+                <button type="button" style={styles.mobileActionButton} {...tapActionProps(() => virtualUseItemRef.current())}>Предмет</button>
+                <button type="button" style={styles.mobileActionButtonAccent} {...tapActionProps(() => virtualTeleportRef.current())}>Хлоддев</button>
+              </div>
+            </div>
+          )}
 
           {taunt && <div style={styles.taunt}>{taunt}</div>}
           {dialog && <DialogPanel dialog={dialog} onChoose={handleDialogChoice} />}
@@ -4867,7 +5095,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       )}
 
       {phase !== 'playing' && (
-        <section style={styles.panel}>
+        <section style={panelStyle}>
           <p style={styles.eyebrow}>QASQYR 3D</p>
           <h2 style={styles.title}>
             {phase === 'won' ? 'Крепость открыта' : phase === 'lost' ? 'Степь тебя остановила' : '3D survival в степи'}
@@ -4900,7 +5128,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
               </div>
 
               {activeMenuTab === 'modes' && (
-                <div style={styles.difficultyGrid}>
+                <div style={{ ...styles.difficultyGrid, ...(isMobile ? styles.difficultyGridMobile : null) }}>
                   {(['story', 'survival', 'nightmare'] as Difficulty[]).map((level) => (
                     <button
                       key={level}
@@ -4919,7 +5147,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
               )}
 
               {activeMenuTab === 'skins' && (
-                <div style={styles.skinGrid}>
+                <div style={{ ...styles.skinGrid, ...(isMobile ? styles.skinGridMobile : null) }}>
                   {KNIFE_SKINS.map((skin) => (
                     (() => {
                       const unlocked = unlockedSkinIds.includes(skin.id);
@@ -4953,7 +5181,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
                     <span>Золото: <b>{wallet.gold}</b></span>
                     <span>Алмазы: <b>{wallet.premium}</b></span>
                   </div>
-                  <div style={styles.shopGrid}>
+                  <div style={{ ...styles.shopGrid, ...(isMobile ? styles.shopGridMobile : null) }}>
                     <button type="button" onClick={() => BuyCase('Steppe Case', false)} style={styles.shopButton}>
                       <b>Steppe Case</b>
                       <span>{CASE_PRICES.gold} золота</span>
@@ -4986,20 +5214,10 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
                   <p style={styles.shopLog}>{caseLog}</p>
                 </div>
               )}
-
-              <div style={styles.assetPackPanel}>
-                <b>ZIP asset packs in game</b>
-                <span>Archives are kept as source packs. The map uses optimized runtime versions so the browser does not freeze.</span>
-                <div style={styles.assetPackGrid}>
-                  {ZIP_ASSET_PACKS.map((pack) => (
-                    <small key={pack} style={styles.assetPackItem}>{pack}</small>
-                  ))}
-                </div>
-              </div>
             </>
           )}
           {phase === 'tutorial' && (
-            <div style={styles.tutorialPanel}>
+            <div style={{ ...styles.tutorialPanel, ...(isMobile ? styles.tutorialPanelMobile : null) }}>
               <div style={styles.tutorialItem}>
                 <b>Цель</b>
                 <span>Найди ключ и код, поговори с выжившими и доберись до крепости.</span>
@@ -5018,8 +5236,8 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
               </div>
             </div>
           )}
-          <div style={styles.controls}>WASD - движение · мышь - прицел · клик - удар · Space - Хлоддев · Esc - выход</div>
-          <button type="button" onClick={handleMainPlay} disabled={!progressLoaded} style={styles.play}>
+          <div style={styles.controls}>{isMobile ? 'На телефоне используй экранные кнопки: движение, удар, бег, предмет и Хлоддев.' : 'WASD - движение · мышь - прицел · клик - удар · Space - Хлоддев · Esc - выход'}</div>
+          <button type="button" onClick={handleMainPlay} disabled={!progressLoaded} style={{ ...styles.play, ...(isMobile ? styles.playMobile : null) }}>
             {!progressLoaded ? 'Загрузка...' : phase === 'intro' ? (savedGameState ? 'Продолжить' : 'Играть') : phase === 'tutorial' ? 'Понятно, начать' : 'Еще раз'}
           </button>
         </section>
@@ -5200,7 +5418,66 @@ const styles: Record<string, CSSProperties> = {
     color: '#f6f2e9',
     fontFamily: 'Inter, system-ui, sans-serif',
   },
+  rootMobileMenu: {
+    position: 'relative',
+    inset: 'auto',
+    minHeight: '100dvh',
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    padding: '18px 14px 28px',
+    WebkitOverflowScrolling: 'touch',
+  },
+  rootMobilePlaying: {
+    width: '100dvw',
+    height: '100dvh',
+    overflow: 'hidden',
+    touchAction: 'none',
+  },
   mount: { position: 'absolute', inset: 0 },
+  cinematicGrade: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 1,
+    pointerEvents: 'none',
+    background:
+      'radial-gradient(circle at 52% 42%, transparent 0 48%, rgba(0,0,0,.28) 78%, rgba(0,0,0,.55) 100%), linear-gradient(180deg, rgba(255,188,92,.08), transparent 38%, rgba(7,10,14,.2))',
+    mixBlendMode: 'multiply',
+  },
+  menuBackdrop: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 0,
+    background:
+      'linear-gradient(90deg, rgba(6,8,7,.86), rgba(6,8,7,.42) 52%, rgba(6,8,7,.78)), linear-gradient(180deg, rgba(6,8,7,.18), rgba(6,8,7,.86)), url("/presentation/qasqyr-gameplay-3d.png") center / cover no-repeat',
+    filter: 'saturate(1.16) contrast(1.08)',
+  },
+  orientationOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 90,
+    display: 'grid',
+    placeContent: 'center',
+    justifyItems: 'center',
+    gap: 12,
+    padding: 24,
+    background: 'rgba(5,8,7,.9)',
+    color: '#f6f2e9',
+    textAlign: 'center',
+    pointerEvents: 'none',
+  },
+  orientationPhone: {
+    width: 84,
+    height: 54,
+    display: 'grid',
+    placeItems: 'center',
+    border: '2px solid rgba(112,214,255,.7)',
+    borderRadius: 10,
+    color: '#70d6ff',
+    fontSize: 32,
+    fontWeight: 1000,
+    transform: 'rotate(90deg)',
+    boxShadow: '0 0 30px rgba(112,214,255,.22)',
+  },
   loadingOverlay: {
     position: 'absolute',
     inset: 0,
@@ -5274,6 +5551,16 @@ const styles: Record<string, CSSProperties> = {
     alignItems: 'stretch',
     pointerEvents: 'none',
   },
+  hudMobile: {
+    left: 'auto',
+    right: 10,
+    top: 10,
+    bottom: 'auto',
+    width: 'min(52vw, 470px)',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: 6,
+    fontSize: 11,
+  },
   stat: {
     minHeight: 58,
     border: '1px solid rgba(255,255,255,.18)',
@@ -5313,6 +5600,13 @@ const styles: Record<string, CSSProperties> = {
     gap: 8,
     width: 210,
     pointerEvents: 'none',
+  },
+  questPanelMobile: {
+    top: 10,
+    left: 10,
+    width: 'min(210px, 32vw)',
+    gap: 6,
+    fontSize: 12,
   },
   questRow: {
     display: 'grid',
@@ -5859,13 +6153,26 @@ const styles: Record<string, CSSProperties> = {
     left: '50%',
     top: '50%',
     transform: 'translate(-50%, -50%)',
+    zIndex: 1,
     width: 'min(680px, calc(100vw - 32px))',
     border: '1px solid rgba(255,255,255,.18)',
-    background: 'linear-gradient(180deg, rgba(21,27,33,.96), rgba(12,15,18,.96))',
+    background: 'linear-gradient(180deg, rgba(21,27,33,.9), rgba(8,12,10,.94))',
     borderRadius: 8,
     padding: 28,
     boxShadow: '0 24px 90px rgba(0,0,0,.55)',
     textAlign: 'center',
+  },
+  panelMobile: {
+    position: 'relative',
+    left: 'auto',
+    top: 'auto',
+    transform: 'none',
+    width: '100%',
+    margin: '0 auto',
+    padding: 18,
+    textAlign: 'left',
+    maxHeight: 'none',
+    overflow: 'visible',
   },
   eyebrow: { margin: 0, color: '#70d6ff', fontSize: 13, fontWeight: 900, letterSpacing: 2 },
   title: { margin: '8px 0 10px', fontSize: 36, lineHeight: 1.05 },
@@ -5906,6 +6213,10 @@ const styles: Record<string, CSSProperties> = {
     gap: 8,
     margin: '0 0 18px',
   },
+  difficultyGridMobile: {
+    gridTemplateColumns: '1fr',
+    gap: 10,
+  },
   difficultyButton: {
     border: '1px solid rgba(255,255,255,.18)',
     borderRadius: 8,
@@ -5939,6 +6250,9 @@ const styles: Record<string, CSSProperties> = {
     gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
     gap: 10,
     margin: '0 0 18px',
+  },
+  skinGridMobile: {
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
   },
   skinCard: {
     minHeight: 132,
@@ -5977,6 +6291,9 @@ const styles: Record<string, CSSProperties> = {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
     gap: 10,
+  },
+  shopGridMobile: {
+    gridTemplateColumns: '1fr',
   },
   shopButton: {
     border: '1px solid rgba(255,211,77,.34)',
@@ -6133,6 +6450,9 @@ const styles: Record<string, CSSProperties> = {
     gap: 10,
     margin: '0 0 18px',
   },
+  tutorialPanelMobile: {
+    gridTemplateColumns: '1fr',
+  },
   tutorialItem: {
     minHeight: 96,
     display: 'grid',
@@ -6144,6 +6464,65 @@ const styles: Record<string, CSSProperties> = {
     background: 'rgba(0,0,0,.18)',
     color: '#d8d1c3',
     lineHeight: 1.4,
+  },
+  mobileControls: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 12,
+    zIndex: 5,
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: 12,
+    alignItems: 'end',
+    pointerEvents: 'auto',
+  },
+  mobileMovePad: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 42px)',
+    gridTemplateRows: 'repeat(2, 42px)',
+    gap: 6,
+    justifyContent: 'start',
+  },
+  mobilePadButton: {
+    width: 42,
+    height: 42,
+    border: '1px solid rgba(255,255,255,.26)',
+    borderRadius: 8,
+    background: 'rgba(8,12,16,.76)',
+    color: '#f6f2e9',
+    fontSize: 19,
+    fontWeight: 1000,
+    touchAction: 'none',
+    userSelect: 'none',
+  },
+  mobileActionPad: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 8,
+    width: 'min(330px, 42vw)',
+  },
+  mobileActionButton: {
+    minHeight: 42,
+    border: '1px solid rgba(255,255,255,.24)',
+    borderRadius: 8,
+    background: 'rgba(8,12,16,.78)',
+    color: '#f6f2e9',
+    fontSize: 13,
+    fontWeight: 900,
+    touchAction: 'none',
+    userSelect: 'none',
+  },
+  mobileActionButtonAccent: {
+    minHeight: 42,
+    border: '1px solid rgba(112,214,255,.5)',
+    borderRadius: 8,
+    background: 'rgba(112,214,255,.18)',
+    color: '#d9f7ff',
+    fontSize: 13,
+    fontWeight: 1000,
+    touchAction: 'none',
+    userSelect: 'none',
   },
   vision: {
     position: 'fixed',
@@ -6169,5 +6548,10 @@ const styles: Record<string, CSSProperties> = {
     color: '#fff',
     fontWeight: 900,
     fontSize: 17,
+  },
+  playMobile: {
+    width: '100%',
+    minHeight: 52,
+    fontSize: 18,
   },
 };
