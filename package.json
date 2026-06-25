@@ -10,6 +10,7 @@
     "video:gameplay": "node scripts/record-gameplay.mjs",
     "video:trailer": "node scripts/generate-gameplay-trailer.mjs",
     "video:cinematic": "node scripts/generate-cinematic-still-trailer.mjs",
+    "video:slide5": "node scripts/generate-slide5-video-with-music.mjs",
     "db:login": "supabase login",
     "db:link": "supabase link",
     "db:new": "supabase migration new",
@@ -24,6 +25,7 @@
     "three": "^0.184.0"
   },
   "devDependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/three": "^0.184.1",
