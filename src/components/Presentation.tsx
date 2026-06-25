@@ -29,7 +29,7 @@ const promoShots: PromoShot[] = [
   },
   {
     title: 'Геймплей',
-    src: '/presentation/qasqyr-generated-vista.png',
+    src: '/presentation/qasqyr-generated-zombie-combat.png',
     caption: 'Игрок и AI-напарник проходят карту и сражаются с врагами.',
   },
 ];
@@ -108,16 +108,8 @@ export function PresentationPage() {
           </div>
           <div style={styles.performancePanel}>
             <div style={styles.deviceRow}>
-              <div style={styles.laptopVisual}>
-                <div style={styles.laptopScreen}>
-                  <span style={styles.sunDot} />
-                  <span style={styles.miniMountainA} />
-                  <span style={styles.miniMountainB} />
-                  <span style={styles.miniTreeA} />
-                  <span style={styles.miniTreeB} />
-                  <span style={styles.miniHouse} />
-                </div>
-                <div style={styles.laptopBase} />
+              <div style={styles.performanceImageFrame}>
+                <img src="/presentation/qasqyr-generated-pc-ultra.png" alt="QASQYR 3D PC graphics version" style={styles.performanceImage} />
               </div>
               <div style={styles.performanceStats}>
                 <b>ПК-версия</b>
@@ -130,11 +122,8 @@ export function PresentationPage() {
               <span style={styles.loadMeterFill} />
             </div>
             <div style={styles.deviceRow}>
-              <div style={styles.phoneVisual}>
-                <div style={styles.phoneScreen}>
-                  <span style={styles.phonePath} />
-                  <span style={styles.phoneHero} />
-                </div>
+              <div style={styles.performanceImageFrameLite}>
+                <img src="/presentation/qasqyr-generated-mobile-lite.png" alt="QASQYR 3D mobile lite graphics version" style={styles.performanceImage} />
               </div>
               <div style={styles.performanceStats}>
                 <b>Телефон</b>
@@ -561,6 +550,29 @@ const styles: Record<string, CSSProperties> = {
     gridTemplateColumns: 'minmax(160px, 220px) minmax(0, 1fr)',
     alignItems: 'center',
     gap: 18,
+  },
+  performanceImageFrame: {
+    minHeight: 124,
+    borderRadius: 8,
+    overflow: 'hidden',
+    border: '1px solid rgba(255,255,255,.24)',
+    background: '#090d0c',
+    boxShadow: '0 18px 42px rgba(0,0,0,.28)',
+  },
+  performanceImageFrameLite: {
+    minHeight: 124,
+    borderRadius: 8,
+    overflow: 'hidden',
+    border: '1px solid rgba(255,255,255,.14)',
+    background: '#111613',
+    filter: 'saturate(.76) contrast(.88)',
+    boxShadow: '0 12px 28px rgba(0,0,0,.2)',
+  },
+  performanceImage: {
+    width: '100%',
+    height: 124,
+    objectFit: 'cover',
+    display: 'block',
   },
   laptopVisual: {
     display: 'grid',
