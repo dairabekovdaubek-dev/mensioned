@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, useState } from 'react';
 
 type Slide = {
   id: number;
@@ -6,31 +6,51 @@ type Slide = {
   content: JSX.Element;
 };
 
-type PromoShot = {
+type Feature = {
+  title: string;
+  text: string;
+};
+
+type GalleryShot = {
   title: string;
   src: string;
-  caption: string;
+  text: string;
 };
 
 const APP_NAME = 'QASQYR 3D';
 const MOBILE_GAME_URL = 'https://mensioned.vercel.app/mobile?v=graphics-20260624';
 const GAMEPLAY_VIDEO_SRC = '/presentation/qasqyr-gameplay-recording.webm';
 
-const promoShots: PromoShot[] = [
+const galleryShots: GalleryShot[] = [
   {
     title: 'Атмосфера мира',
     src: '/presentation/qasqyr-menu-3d.png',
-    caption: 'Степь, вода, горы и средневековая деревня в 3D.',
+    text: 'Степь, вода, горы, деревня и опасные маршруты для выживания.',
   },
   {
-    title: 'Скины и магазин',
-    src: '/presentation/qasqyr-skins-3d.png',
-    caption: 'Ножи, кейсы, золото и алмазы для прогресса.',
-  },
-  {
-    title: 'Геймплей',
+    title: 'Сражение',
     src: '/presentation/qasqyr-generated-zombie-combat.png',
-    caption: 'Игрок и AI-напарник проходят карту и сражаются с врагами.',
+    text: 'Игрок сражается с врагами и защищает путь вместе с AI-напарником.',
+  },
+  {
+    title: 'Скины и прогресс',
+    src: '/presentation/qasqyr-skins-3d.png',
+    text: 'Ножи, кейсы, золото, алмазы и визуальные награды за прохождение.',
+  },
+];
+
+const features: Feature[] = [
+  {
+    title: '3D survival',
+    text: 'Игрок исследует опасный мир, двигается по карте, сражается и ищет ресурсы.',
+  },
+  {
+    title: 'AI-напарник',
+    text: 'В игре есть история со спасением напарника и совместным прохождением.',
+  },
+  {
+    title: 'Мобильная версия',
+    text: 'Телефонная сборка легче по графике, чтобы запускалась стабильнее.',
   },
 ];
 
@@ -43,47 +63,76 @@ export function PresentationPage() {
   const slides: Slide[] = [
     {
       id: 1,
-      label: 'Автор',
+      label: 'Обложка',
       content: (
-        <section style={styles.heroSlide}>
-          <p style={styles.kicker}>nFactorial Teens</p>
-          <h1 style={styles.heroTitle}>Даубек Дайрабеков</h1>
-          <p style={styles.heroText}>
-            Маленький факт: я делаю 3D survival-игру с режимами, скинами, отзывами и AI-напарником.
-          </p>
+        <section className="porcelain-slide porcelain-hero">
+          <div className="porcelain-landscape" />
+          <div className="hero-copy">
+            <p className="eyebrow">nFactorial Teens project</p>
+            <h1>{APP_NAME}</h1>
+            <p>Атмосферная 3D survival-игра про выживание, бой, скины и AI-напарника.</p>
+          </div>
         </section>
       ),
     },
     {
       id: 2,
-      label: 'Приложение',
+      label: 'О проекте',
       content: (
-        <section style={styles.centerSlide}>
-          <p style={styles.kicker}>Название апки</p>
-          <h2 style={styles.title}>{APP_NAME}</h2>
-          <p style={styles.bigSentence}>
-            Это атмосферная 3D survival-игра, где игрок выбирает режим, исследует опасный мир,
-            открывает скины и проходит испытания вместе с AI-напарником.
-          </p>
+        <section className="porcelain-slide split-slide">
+          <div className="soft-panel">
+            <p className="eyebrow">Идея игры</p>
+            <h2>Выжить в красивом, но опасном мире</h2>
+            <p>
+              QASQYR 3D соединяет исследование карты, сражения с зомби, сбор наград,
+              магазин скинов и сюжет с AI-напарником. Игрок не просто смотрит на мир,
+              а проходит испытания и развивается.
+            </p>
+          </div>
+          <figure className="image-note">
+            <img src="/presentation/qasqyr-generated-vista.png" alt="Атмосферный мир QASQYR 3D" />
+            <figcaption>Мир игры: горы, вода, деревня и путь героя</figcaption>
+          </figure>
         </section>
       ),
     },
     {
       id: 3,
-      label: 'Скриншоты',
+      label: 'Содержание',
       content: (
-        <section style={styles.gallerySlide}>
-          <div style={styles.galleryHeader}>
-            <p style={styles.kicker}>Screenshots</p>
-            <h2 style={styles.title}>Готовые 3D-кадры игры</h2>
+        <section className="porcelain-slide contents-slide">
+          <p className="eyebrow">Table of contents</p>
+          <h2>Что есть в QASQYR 3D</h2>
+          <div className="contents-list">
+            {features.map((feature, index) => (
+              <article key={feature.title} className="contents-row">
+                <span>{index + 1}</span>
+                <div>
+                  <b>{feature.title}</b>
+                  <p>{feature.text}</p>
+                </div>
+              </article>
+            ))}
           </div>
-          <div style={styles.galleryGrid}>
-            {promoShots.map((shot) => (
-              <figure key={shot.title} style={styles.promoCard}>
-                <img src={shot.src} alt={shot.title} style={styles.promoImage} />
-                <figcaption style={styles.promoCaption}>
+        </section>
+      ),
+    },
+    {
+      id: 4,
+      label: 'Визуал',
+      content: (
+        <section className="porcelain-slide gallery-slide">
+          <div className="slide-heading">
+            <p className="eyebrow">Visual world</p>
+            <h2>Кадры игры</h2>
+          </div>
+          <div className="gallery-grid">
+            {galleryShots.map((shot) => (
+              <figure key={shot.title} className="gallery-card">
+                <img src={shot.src} alt={shot.title} />
+                <figcaption>
                   <b>{shot.title}</b>
-                  <span>{shot.caption}</span>
+                  <span>{shot.text}</span>
                 </figcaption>
               </figure>
             ))}
@@ -92,67 +141,21 @@ export function PresentationPage() {
       ),
     },
     {
-      id: 4,
-      label: 'Lite build',
-      content: (
-        <section style={styles.performanceSlide}>
-          <div style={styles.performanceCopy}>
-            <p style={styles.kicker}>Performance</p>
-            <h2 style={styles.title}>Игра тяжелая не просто так</h2>
-            <p style={styles.performanceLead}>
-              В полной версии QASQYR 3D используются 3D-модели, большие текстуры, свет, тени, вода, трава, дома и персонажи. Не каждый ноутбук спокойно тянет такую сцену, а телефон тем более.
-            </p>
-            <p style={styles.performanceNote}>
-              Поэтому мобильная версия сделана легче по графике: меньше тяжелых эффектов, проще окружение, быстрее загрузка и стабильнее управление с экрана.
-            </p>
-          </div>
-          <div style={styles.performancePanel}>
-            <div style={styles.deviceRow}>
-              <div style={styles.performanceImageFrame}>
-                <img src="/presentation/qasqyr-generated-pc-ultra.png" alt="QASQYR 3D PC graphics version" style={styles.performanceImage} />
-              </div>
-              <div style={styles.performanceStats}>
-                <b>ПК-версия</b>
-                <span>Максимальная графика</span>
-                <span>FBX-модели и текстуры</span>
-                <span>Тяжелая сцена</span>
-              </div>
-            </div>
-            <div style={styles.loadMeter}>
-              <span style={styles.loadMeterFill} />
-            </div>
-            <div style={styles.deviceRow}>
-              <div style={styles.performanceImageFrameLite}>
-                <img src="/presentation/qasqyr-generated-mobile-lite.png" alt="QASQYR 3D mobile lite graphics version" style={styles.performanceImage} />
-              </div>
-              <div style={styles.performanceStats}>
-                <b>Телефон</b>
-                <span>Легкая графика</span>
-                <span>Быстрее запуск</span>
-                <span>Горизонтальное управление</span>
-              </div>
-            </div>
-          </div>
-        </section>
-      ),
-    },
-    {
       id: 5,
-      label: 'Video-demo',
+      label: 'Демо',
       content: (
-        <section style={styles.demoSlide}>
-          <div>
-            <p style={styles.kicker}>Video-demo</p>
-            <h2 style={styles.title}>Демо игры</h2>
-            <p style={styles.text}>
-              Нажми Play: демо показывает старт, выбор режима, движение по карте, встречу с напарником,
-              магазин скинов и QR-переход на мобильную версию.
+        <section className="porcelain-slide demo-slide">
+          <div className="demo-copy">
+            <p className="eyebrow">Gameplay video</p>
+            <h2>Видео с геймплеем</h2>
+            <p>
+              В ролике показан мир игры и легкий фрагмент реального геймплея:
+              движение по карте, взаимодействие с окружением и атмосфера survival-проекта.
             </p>
           </div>
-          <div style={styles.videoFrame}>
+          <div className="video-frame">
             <video
               key={demoPlaying ? 'gameplay-playing' : 'gameplay-paused'}
-              style={styles.gameplayVideo}
               src={GAMEPLAY_VIDEO_SRC}
               poster="/presentation/qasqyr-generated-dialogue.png"
               controls={demoPlaying}
@@ -161,14 +164,9 @@ export function PresentationPage() {
               loop
               playsInline
             />
-            <div style={styles.videoOverlay}>
-              <span style={styles.videoOverlayBadge}>3D survival</span>
-              <span style={styles.videoOverlayBadge}>AI-напарник</span>
-              <span style={styles.videoOverlayBadge}>Бой и исследование</span>
-            </div>
             {!demoPlaying && (
-              <button type="button" style={styles.playCircle} onClick={() => setDemoPlaying(true)} aria-label="Play gameplay recording">
-                ▶
+              <button type="button" className="play-button" onClick={() => setDemoPlaying(true)} aria-label="Запустить видео">
+                Play
               </button>
             )}
           </div>
@@ -179,16 +177,19 @@ export function PresentationPage() {
       id: 6,
       label: 'QR',
       content: (
-        <section style={styles.qrSlide}>
-          <div>
-            <p style={styles.kicker}>Mobile link</p>
-            <h2 style={styles.title}>Играй с телефона</h2>
-            <p style={styles.callToAction}>Сканируй QR и попробуй выжить в QASQYR 3D прямо сейчас.</p>
-            <a style={styles.mobileLink} href={mobileUrl}>{mobileUrl}</a>
+        <section className="porcelain-slide qr-slide">
+          <div className="soft-panel">
+            <p className="eyebrow">Mobile link</p>
+            <h2>Попробуй игру</h2>
+            <p>
+              Отсканируй QR-код и запусти мобильную версию QASQYR 3D. Она легче по графике,
+              поэтому лучше подходит для телефона.
+            </p>
+            <a href={mobileUrl}>{mobileUrl}</a>
           </div>
-          <div style={styles.qrCard}>
-            <img style={styles.qrImage} src={qrUrl} alt="QR code to QASQYR 3D mobile game" />
-            <span style={styles.qrCaption}>QR ведет на мобильную версию игры</span>
+          <div className="qr-box">
+            <img src={qrUrl} alt="QR-код на мобильную версию QASQYR 3D" />
+            <span>Ссылка ведет на мобильную версию игры</span>
           </div>
         </section>
       ),
@@ -198,32 +199,35 @@ export function PresentationPage() {
   const current = slides[activeSlide];
 
   return (
-    <main style={styles.page}>
-      <DemoAnimationStyles />
-      <nav style={styles.nav}>
-        <b>{APP_NAME} Presentation</b>
-        <div style={styles.navButtons}>
+    <main className="presentation-shell">
+      <PresentationStyles />
+      <nav className="presentation-nav">
+        <b>{APP_NAME}</b>
+        <div className="nav-buttons">
           {slides.map((slide, index) => (
             <button
               key={slide.id}
               type="button"
               onClick={() => setActiveSlide(index)}
-              style={index === activeSlide ? styles.navButtonActive : styles.navButton}
+              className={index === activeSlide ? 'is-active' : ''}
+              aria-label={`Слайд ${slide.id}: ${slide.label}`}
             >
               {slide.id}
             </button>
           ))}
         </div>
       </nav>
-      <article style={styles.deck}>
-        <div style={styles.slideMeta}>Slide {current.id} / {slides.length} · {current.label}</div>
+
+      <article className="deck">
+        <div className="slide-meta">Slide {current.id} / {slides.length} · {current.label}</div>
         {current.content}
       </article>
-      <footer style={styles.footer}>
-        <button type="button" style={styles.footerButton} onClick={() => setActiveSlide((value) => Math.max(0, value - 1))}>
+
+      <footer className="presentation-footer">
+        <button type="button" onClick={() => setActiveSlide((value) => Math.max(0, value - 1))}>
           Назад
         </button>
-        <button type="button" style={styles.footerButtonPrimary} onClick={() => setActiveSlide((value) => Math.min(slides.length - 1, value + 1))}>
+        <button type="button" className="primary" onClick={() => setActiveSlide((value) => Math.min(slides.length - 1, value + 1))}>
           Дальше
         </button>
       </footer>
@@ -231,656 +235,414 @@ export function PresentationPage() {
   );
 }
 
-function DemoAnimationStyles() {
+function PresentationStyles() {
   return (
     <style>{`
-      .qasqyr-demo * { box-sizing: border-box; }
-      .qasqyr-demo .demo-bg {
-        position: absolute;
-        inset: 0;
-        background:
-          radial-gradient(circle at 78% 18%, rgba(255,211,123,.52), transparent 9%),
-          linear-gradient(180deg, #2e4b4a 0%, #17221b 52%, #101411 100%);
+      @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@500;700;900&display=swap');
+
+      .presentation-shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 16px;
+        padding: 22px;
+        background: #171b21;
+        color: #27313a;
+        font-family: Inter, system-ui, sans-serif;
       }
-      .qasqyr-demo .demo-mountains {
-        position: absolute;
-        left: -8%;
-        right: -8%;
-        bottom: 35%;
-        height: 42%;
-        background: linear-gradient(135deg, #526a51, #2e4037);
-        clip-path: polygon(0 100%, 11% 34%, 20% 78%, 32% 18%, 45% 84%, 58% 28%, 70% 76%, 83% 22%, 100% 100%);
-      }
-      .qasqyr-demo .demo-water {
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        height: 28%;
-        background: linear-gradient(180deg, rgba(58,103,114,.92), rgba(19,52,61,.96));
-      }
-      .qasqyr-demo .demo-road {
-        position: absolute;
-        left: 50%;
-        bottom: -18%;
-        width: 44%;
-        height: 70%;
-        transform: translateX(-50%) perspective(240px) rotateX(48deg);
-        background: linear-gradient(180deg, #817653, #2b271f);
-        clip-path: polygon(42% 0, 58% 0, 100% 100%, 0 100%);
-      }
-      .qasqyr-demo .demo-village {
-        position: absolute;
-        right: 8%;
-        bottom: 29%;
-        width: 24%;
-        height: 20%;
-        background:
-          linear-gradient(45deg, transparent 45%, #754b31 46% 55%, transparent 56%),
-          linear-gradient(135deg, transparent 44%, #754b31 45% 56%, transparent 57%),
-          linear-gradient(90deg, #493323 0 18%, transparent 18% 28%, #493323 28% 46%, transparent 46% 58%, #493323 58% 74%, transparent 74%);
-        opacity: .94;
-      }
-      .qasqyr-demo .demo-player,
-      .qasqyr-demo .demo-companion,
-      .qasqyr-demo .demo-enemy {
-        position: absolute;
-        bottom: 18%;
-        width: 34px;
-        height: 68px;
-        border-radius: 18px 18px 8px 8px;
-        box-shadow: 0 16px 22px rgba(0,0,0,.35);
-      }
-      .qasqyr-demo .demo-player {
-        left: 42%;
-        background: linear-gradient(180deg, #9ddf9b, #41623e);
-      }
-      .qasqyr-demo .demo-companion {
-        left: 52%;
-        background: linear-gradient(180deg, #70d6ff, #26566d);
-      }
-      .qasqyr-demo .demo-enemy {
-        width: 30px;
-        height: 60px;
-        background: linear-gradient(180deg, #302421, #120f0e);
-      }
-      .qasqyr-demo .demo-enemy-a { left: 66%; bottom: 25%; }
-      .qasqyr-demo .demo-enemy-b { left: 26%; bottom: 26%; }
-      .qasqyr-demo .demo-knife {
-        position: absolute;
-        left: 43%;
-        bottom: 33%;
-        width: 52px;
-        height: 8px;
-        border-radius: 999px;
-        background: linear-gradient(90deg, #cfd6d2 0 70%, #ffd37b 70%);
-        transform: rotate(-22deg);
-        box-shadow: 0 0 18px rgba(255,211,123,.45);
-      }
-      .qasqyr-demo .demo-case {
-        position: absolute;
-        right: 12%;
-        bottom: 12%;
-        width: 88px;
-        height: 56px;
-        border: 2px solid rgba(255,211,123,.7);
+
+      .presentation-shell button {
+        min-height: 42px;
+        border: 1px solid rgba(61, 86, 111, .28);
         border-radius: 8px;
-        background: linear-gradient(180deg, #4c3425, #201710);
-        box-shadow: 0 0 34px rgba(255,211,123,.26);
-      }
-      .qasqyr-demo .demo-hud {
-        position: absolute;
-        left: 16px;
-        right: 16px;
-        top: 16px;
-        display: flex;
-        justify-content: space-between;
-        gap: 8px;
-        color: #f8f4ea;
+        cursor: pointer;
+        font: inherit;
         font-weight: 900;
       }
-      .qasqyr-demo .demo-hud span,
-      .qasqyr-demo .demo-caption span {
-        padding: 8px 10px;
-        border: 1px solid rgba(255,255,255,.16);
-        border-radius: 8px;
-        background: rgba(10,14,12,.7);
+
+      .presentation-nav,
+      .presentation-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: #eef4f6;
       }
-      .qasqyr-demo .demo-caption {
-        position: absolute;
-        left: 16px;
-        right: 16px;
-        bottom: 16px;
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+
+      .presentation-nav b {
+        font-family: Cinzel, Georgia, serif;
+        font-size: clamp(18px, 2vw, 28px);
+      }
+
+      .nav-buttons {
+        display: flex;
         gap: 8px;
-        color: #f8f4ea;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .nav-buttons button {
+        width: 42px;
+        padding: 0;
+        background: #eef1e4;
+        color: #4a6175;
+      }
+
+      .nav-buttons button.is-active,
+      .presentation-footer .primary {
+        background: #6d8fb0;
+        color: #fffaf0;
+        border-color: rgba(255, 255, 255, .42);
+      }
+
+      .presentation-footer {
+        justify-content: flex-end;
+      }
+
+      .presentation-footer button {
+        padding: 0 18px;
+        background: #eef1e4;
+        color: #4a6175;
+      }
+
+      .deck {
+        position: relative;
+        min-height: 0;
+        overflow: hidden;
+        padding: clamp(14px, 2.2vw, 28px);
+        border: 1px solid rgba(255, 255, 255, .18);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0)),
+          #20252b;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, .32);
+      }
+
+      .slide-meta {
+        position: relative;
+        z-index: 3;
+        margin-bottom: 12px;
+        color: #d8e4ea;
         font-size: 13px;
-        font-weight: 800;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      .porcelain-slide {
+        position: relative;
+        min-height: min(68vh, 760px);
+        overflow: hidden;
+        border-radius: 8px;
+        padding: clamp(24px, 5vw, 62px);
+        background:
+          radial-gradient(circle at 15% 18%, rgba(101, 138, 170, .2), transparent 22%),
+          radial-gradient(circle at 88% 16%, rgba(101, 138, 170, .22), transparent 24%),
+          linear-gradient(180deg, rgba(253, 248, 229, .94), rgba(242, 237, 217, .98));
+        color: #27313a;
+        box-shadow: inset 0 0 0 1px rgba(68, 91, 111, .2);
+      }
+
+      .porcelain-slide::before,
+      .porcelain-slide::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .porcelain-slide::before {
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.44), transparent 18%, transparent 76%, rgba(72,95,116,.18)),
+          radial-gradient(circle at 10% 83%, rgba(78, 111, 145, .18), transparent 24%),
+          radial-gradient(circle at 90% 82%, rgba(78, 111, 145, .2), transparent 26%);
+      }
+
+      .porcelain-slide::after {
+        border: 16px solid rgba(53, 84, 112, .18);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .5);
+      }
+
+      .porcelain-landscape {
+        position: absolute;
+        inset: 0;
+        opacity: .78;
+        background:
+          linear-gradient(rgba(246, 243, 224, .22), rgba(246, 243, 224, .38)),
+          url('/presentation/qasqyr-generated-vista.png') center / cover;
+        filter: grayscale(.62) sepia(.08) hue-rotate(168deg) saturate(.7) brightness(1.18);
+      }
+
+      .hero-copy,
+      .soft-panel,
+      .image-note,
+      .contents-slide > *,
+      .gallery-slide > *,
+      .demo-slide > *,
+      .qr-slide > * {
+        position: relative;
+        z-index: 2;
+      }
+
+      .porcelain-hero {
+        display: grid;
+        place-items: center;
         text-align: center;
       }
-      .qasqyr-demo.is-playing .demo-player {
-        animation: demo-player-run 9s ease-in-out infinite;
+
+      .hero-copy {
+        width: min(900px, 100%);
+        padding: clamp(18px, 3vw, 34px);
+        background: rgba(255, 255, 255, .2);
+        backdrop-filter: blur(2px);
+        border-radius: 8px;
       }
-      .qasqyr-demo.is-playing .demo-companion {
-        animation: demo-companion-run 9s ease-in-out infinite;
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: #496d91;
+        font-size: clamp(12px, 1.4vw, 16px);
+        font-weight: 900;
+        text-transform: uppercase;
       }
-      .qasqyr-demo.is-playing .demo-enemy-a {
-        animation: demo-enemy-a 9s ease-in-out infinite;
+
+      h1,
+      h2 {
+        margin: 0;
+        font-family: Cinzel, Georgia, serif;
+        color: #25303a;
+        text-shadow: 0 2px 0 rgba(255,255,255,.76), 0 10px 18px rgba(43,62,82,.16);
       }
-      .qasqyr-demo.is-playing .demo-enemy-b {
-        animation: demo-enemy-b 9s ease-in-out infinite;
+
+      h1 {
+        font-size: clamp(58px, 10vw, 134px);
+        line-height: .9;
       }
-      .qasqyr-demo.is-playing .demo-knife {
-        animation: demo-knife 1.1s ease-in-out infinite;
+
+      h2 {
+        font-size: clamp(34px, 6vw, 76px);
+        line-height: 1;
       }
-      .qasqyr-demo.is-playing .demo-case {
-        animation: demo-case 9s ease-in-out infinite;
+
+      p {
+        margin: 0;
       }
-      .qasqyr-demo.is-playing .demo-road,
-      .qasqyr-demo.is-playing .demo-water {
-        animation: demo-world 4s linear infinite;
+
+      .hero-copy p:last-child,
+      .soft-panel p,
+      .demo-copy p,
+      .contents-row p {
+        color: #3b4854;
+        font-size: clamp(18px, 2.2vw, 28px);
+        line-height: 1.35;
       }
-      @keyframes demo-player-run {
-        0%, 100% { transform: translate(0, 0) scale(1); }
-        25% { transform: translate(26px, -34px) scale(.9); }
-        52% { transform: translate(76px, -58px) scale(.8); }
-        72% { transform: translate(18px, -20px) scale(1.05); }
+
+      .split-slide,
+      .demo-slide,
+      .qr-slide {
+        display: grid;
+        grid-template-columns: minmax(0, .95fr) minmax(320px, 1.05fr);
+        align-items: center;
+        gap: clamp(20px, 4vw, 48px);
       }
-      @keyframes demo-companion-run {
-        0%, 100% { transform: translate(0, 0) scale(1); }
-        25% { transform: translate(-18px, -28px) scale(.92); }
-        52% { transform: translate(38px, -54px) scale(.82); }
-        72% { transform: translate(-22px, -18px) scale(1.03); }
+
+      .soft-panel {
+        display: grid;
+        gap: 18px;
+        padding: clamp(20px, 3.2vw, 42px);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, .28);
+        border: 1px solid rgba(67, 96, 124, .22);
       }
-      @keyframes demo-enemy-a {
-        0%, 100% { transform: translate(0, 0); opacity: 1; }
-        48% { transform: translate(-76px, 16px); opacity: 1; }
-        60% { transform: translate(-86px, 20px) rotate(18deg); opacity: .35; }
+
+      .image-note,
+      .gallery-card {
+        margin: 0;
+        overflow: hidden;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, .34);
+        border: 1px solid rgba(67, 96, 124, .24);
+        box-shadow: 0 18px 36px rgba(76, 97, 115, .18);
       }
-      @keyframes demo-enemy-b {
-        0%, 100% { transform: translate(0, 0); opacity: 1; }
-        46% { transform: translate(62px, 12px); opacity: 1; }
-        63% { transform: translate(76px, 18px) rotate(-20deg); opacity: .3; }
+
+      .image-note img,
+      .gallery-card img {
+        width: 100%;
+        height: 320px;
+        object-fit: cover;
+        display: block;
+        filter: saturate(.82) contrast(.96) brightness(1.05);
       }
-      @keyframes demo-knife {
-        0%, 100% { transform: rotate(-22deg) translate(0, 0); }
-        50% { transform: rotate(24deg) translate(18px, -8px); }
+
+      .image-note figcaption,
+      .gallery-card figcaption {
+        display: grid;
+        gap: 6px;
+        padding: 14px 16px;
+        color: #334554;
+        font-weight: 700;
       }
-      @keyframes demo-case {
-        0%, 42% { transform: scale(1); filter: brightness(1); }
-        55%, 74% { transform: scale(1.08); filter: brightness(1.45); }
-        100% { transform: scale(1); filter: brightness(1); }
+
+      .image-note figcaption b,
+      .gallery-card figcaption b,
+      .contents-row b {
+        font-family: Cinzel, Georgia, serif;
+        font-size: 24px;
+        color: #31475c;
       }
-      @keyframes demo-world {
-        0% { filter: saturate(1); }
-        50% { filter: saturate(1.2) brightness(1.08); }
-        100% { filter: saturate(1); }
+
+      .contents-slide {
+        display: grid;
+        align-content: center;
+        gap: 22px;
       }
-      @media (max-width: 820px) {
-        .qasqyr-demo .demo-caption { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+      .contents-list {
+        display: grid;
+        gap: 14px;
+        max-width: 980px;
+      }
+
+      .contents-row {
+        display: grid;
+        grid-template-columns: 58px minmax(0, 1fr);
+        gap: 16px;
+        align-items: center;
+        padding: 14px 18px;
+        border-radius: 8px;
+        background: linear-gradient(90deg, rgba(89, 125, 158, .24), rgba(255,255,255,.18));
+        border: 1px solid rgba(67, 96, 124, .2);
+      }
+
+      .contents-row > span {
+        width: 48px;
+        height: 48px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: #6f8fae;
+        color: #fffaf0;
+        font-weight: 900;
+      }
+
+      .gallery-slide {
+        display: grid;
+        align-content: center;
+        gap: 22px;
+      }
+
+      .slide-heading {
+        display: grid;
+        gap: 8px;
+      }
+
+      .gallery-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .gallery-card img {
+        height: 260px;
+      }
+
+      .gallery-card figcaption span {
+        font-size: 15px;
+        line-height: 1.35;
+      }
+
+      .demo-copy {
+        display: grid;
+        gap: 18px;
+      }
+
+      .video-frame {
+        position: relative;
+        overflow: hidden;
+        aspect-ratio: 16 / 9;
+        border-radius: 8px;
+        border: 10px solid rgba(74, 103, 130, .22);
+        background: #0d1218;
+        box-shadow: 0 18px 42px rgba(76, 97, 115, .22);
+      }
+
+      .video-frame video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .play-button {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        padding: 0 28px;
+        background: rgba(245, 241, 222, .92);
+        color: #3c5a76;
+        box-shadow: 0 12px 28px rgba(0,0,0,.22);
+      }
+
+      .qr-box {
+        display: grid;
+        justify-items: center;
+        gap: 12px;
+        padding: 18px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, .5);
+        border: 1px solid rgba(67, 96, 124, .22);
+        color: #31475c;
+        font-weight: 900;
+        text-align: center;
+      }
+
+      .qr-box img {
+        width: min(320px, 100%);
+        aspect-ratio: 1 / 1;
+        border-radius: 8px;
+      }
+
+      .qr-slide a {
+        color: #426b91;
+        font-weight: 900;
+        word-break: break-all;
+      }
+
+      @media (max-width: 900px) {
+        .presentation-shell {
+          padding: 14px;
+        }
+
+        .presentation-nav,
+        .presentation-footer {
+          align-items: stretch;
+        }
+
+        .split-slide,
+        .demo-slide,
+        .qr-slide,
+        .gallery-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .porcelain-slide {
+          min-height: auto;
+          padding: 22px;
+        }
+
+        .porcelain-slide::after {
+          border-width: 10px;
+        }
+
+        .image-note img,
+        .gallery-card img {
+          height: 220px;
+        }
+
+        h1 {
+          font-size: clamp(46px, 14vw, 84px);
+        }
       }
     `}</style>
   );
 }
-
-const styles: Record<string, CSSProperties> = {
-  page: {
-    minHeight: '100vh',
-    padding: 18,
-    display: 'grid',
-    gridTemplateRows: 'auto 1fr auto',
-    gap: 14,
-    background: '#101411',
-    color: '#f8f4ea',
-    fontFamily: 'Inter, system-ui, sans-serif',
-  },
-  nav: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  navButtons: {
-    display: 'flex',
-    gap: 8,
-  },
-  navButton: {
-    width: 42,
-    height: 42,
-    padding: 0,
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.16)',
-    background: 'rgba(255,255,255,.07)',
-    color: '#f8f4ea',
-  },
-  navButtonActive: {
-    width: 42,
-    height: 42,
-    padding: 0,
-    borderRadius: 8,
-    border: '1px solid rgba(255,211,123,.65)',
-    background: '#ffd37b',
-    color: '#1c160a',
-  },
-  deck: {
-    minHeight: 0,
-    padding: 'clamp(20px, 4vw, 48px)',
-    border: '1px solid rgba(255,255,255,.14)',
-    borderRadius: 8,
-    background: 'linear-gradient(135deg, #17221b 0%, #1d2429 54%, #101411 100%)',
-    overflow: 'hidden',
-    display: 'grid',
-    alignContent: 'stretch',
-    gap: 16,
-  },
-  slideMeta: {
-    color: '#ffd37b',
-    fontSize: 14,
-    fontWeight: 800,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  heroSlide: {
-    display: 'grid',
-    alignContent: 'center',
-    gap: 18,
-    minHeight: '60vh',
-  },
-  centerSlide: {
-    display: 'grid',
-    placeContent: 'center',
-    gap: 18,
-    minHeight: '60vh',
-    maxWidth: 980,
-  },
-  gallerySlide: {
-    display: 'grid',
-    alignContent: 'center',
-    gap: 24,
-    minHeight: '60vh',
-  },
-  galleryHeader: {
-    display: 'grid',
-    gap: 10,
-  },
-  demoSlide: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, .82fr) minmax(320px, 1.18fr)',
-    alignItems: 'center',
-    gap: 28,
-    minHeight: '60vh',
-  },
-  performanceSlide: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, .95fr) minmax(360px, 1.05fr)',
-    alignItems: 'center',
-    gap: 32,
-    minHeight: '60vh',
-  },
-  performanceCopy: {
-    display: 'grid',
-    gap: 18,
-  },
-  performanceLead: {
-    margin: 0,
-    color: '#f8f4ea',
-    fontSize: 'clamp(21px, 2.6vw, 34px)',
-    lineHeight: 1.22,
-    fontWeight: 800,
-  },
-  performanceNote: {
-    margin: 0,
-    maxWidth: 760,
-    color: '#cfc7b7',
-    fontSize: 20,
-    lineHeight: 1.45,
-  },
-  performancePanel: {
-    display: 'grid',
-    gap: 18,
-    padding: 22,
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.16)',
-    background: 'linear-gradient(145deg, rgba(14,22,20,.96), rgba(28,20,12,.92))',
-    boxShadow: '0 26px 70px rgba(0,0,0,.34)',
-  },
-  deviceRow: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(160px, 220px) minmax(0, 1fr)',
-    alignItems: 'center',
-    gap: 18,
-  },
-  performanceImageFrame: {
-    minHeight: 124,
-    borderRadius: 8,
-    overflow: 'hidden',
-    border: '1px solid rgba(255,255,255,.24)',
-    background: '#090d0c',
-    boxShadow: '0 18px 42px rgba(0,0,0,.28)',
-  },
-  performanceImageFrameLite: {
-    minHeight: 124,
-    borderRadius: 8,
-    overflow: 'hidden',
-    border: '1px solid rgba(255,255,255,.14)',
-    background: '#111613',
-    filter: 'saturate(.76) contrast(.88)',
-    boxShadow: '0 12px 28px rgba(0,0,0,.2)',
-  },
-  performanceImage: {
-    width: '100%',
-    height: 124,
-    objectFit: 'cover',
-    display: 'block',
-  },
-  laptopVisual: {
-    display: 'grid',
-    gap: 6,
-  },
-  laptopScreen: {
-    position: 'relative',
-    minHeight: 122,
-    borderRadius: 8,
-    overflow: 'hidden',
-    border: '1px solid rgba(255,255,255,.2)',
-    background: 'linear-gradient(180deg, #f0b65a 0%, #355c48 46%, #13201a 100%)',
-  },
-  laptopBase: {
-    height: 12,
-    borderRadius: 8,
-    background: 'linear-gradient(90deg, #403831, #b9a47b 50%, #403831)',
-  },
-  sunDot: {
-    position: 'absolute',
-    right: 20,
-    top: 14,
-    width: 20,
-    height: 20,
-    borderRadius: '50%',
-    background: '#ffd37b',
-    boxShadow: '0 0 28px rgba(255,211,123,.72)',
-  },
-  miniMountainA: {
-    position: 'absolute',
-    left: 0,
-    bottom: 34,
-    width: '58%',
-    height: 48,
-    background: '#243f3a',
-    clipPath: 'polygon(0 100%, 28% 20%, 45% 76%, 68% 12%, 100% 100%)',
-  },
-  miniMountainB: {
-    position: 'absolute',
-    right: 0,
-    bottom: 32,
-    width: '48%',
-    height: 40,
-    background: '#6f5c3b',
-    clipPath: 'polygon(0 100%, 35% 26%, 58% 70%, 82% 18%, 100% 100%)',
-  },
-  miniTreeA: {
-    position: 'absolute',
-    left: 42,
-    bottom: 22,
-    width: 22,
-    height: 48,
-    background: '#0c2117',
-    clipPath: 'polygon(50% 0, 86% 42%, 66% 42%, 96% 76%, 60% 76%, 60% 100%, 40% 100%, 40% 76%, 4% 76%, 34% 42%, 14% 42%)',
-  },
-  miniTreeB: {
-    position: 'absolute',
-    right: 54,
-    bottom: 22,
-    width: 24,
-    height: 50,
-    background: '#2d1645',
-    borderRadius: '50% 50% 12px 12px',
-  },
-  miniHouse: {
-    position: 'absolute',
-    right: 20,
-    bottom: 20,
-    width: 42,
-    height: 34,
-    background: 'linear-gradient(180deg, #7b4a2e 0 38%, #c5a274 38%)',
-    clipPath: 'polygon(50% 0, 100% 38%, 88% 38%, 88% 100%, 12% 100%, 12% 38%, 0 38%)',
-  },
-  performanceStats: {
-    display: 'grid',
-    gap: 7,
-    color: '#ded7c8',
-    fontSize: 16,
-    lineHeight: 1.2,
-  },
-  loadMeter: {
-    height: 16,
-    borderRadius: 999,
-    overflow: 'hidden',
-    background: 'rgba(255,255,255,.12)',
-    border: '1px solid rgba(255,255,255,.14)',
-  },
-  loadMeterFill: {
-    display: 'block',
-    width: '78%',
-    height: '100%',
-    background: 'linear-gradient(90deg, #70d6ff, #ffd37b, #ff7a45)',
-  },
-  phoneVisual: {
-    width: 104,
-    height: 164,
-    justifySelf: 'center',
-    padding: 8,
-    borderRadius: 24,
-    border: '1px solid rgba(255,255,255,.22)',
-    background: '#070b0a',
-    boxShadow: '0 18px 40px rgba(0,0,0,.32)',
-  },
-  phoneScreen: {
-    position: 'relative',
-    width: '100%',
-    height: '100%',
-    borderRadius: 18,
-    overflow: 'hidden',
-    background: 'linear-gradient(180deg, #33554c, #172018)',
-  },
-  phonePath: {
-    position: 'absolute',
-    left: '35%',
-    bottom: -8,
-    width: '42%',
-    height: '82%',
-    background: '#8f6a32',
-    transform: 'skewX(-12deg)',
-  },
-  phoneHero: {
-    position: 'absolute',
-    left: '42%',
-    bottom: 28,
-    width: 14,
-    height: 28,
-    borderRadius: 10,
-    background: '#70d6ff',
-    boxShadow: '0 0 18px rgba(112,214,255,.45)',
-  },
-  qrSlide: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1fr) minmax(240px, 360px)',
-    alignItems: 'center',
-    gap: 28,
-    minHeight: '60vh',
-  },
-  kicker: {
-    margin: 0,
-    color: '#70d6ff',
-    fontWeight: 900,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-  },
-  heroTitle: {
-    margin: 0,
-    maxWidth: 980,
-    fontSize: 'clamp(52px, 10vw, 124px)',
-    lineHeight: .92,
-  },
-  title: {
-    margin: 0,
-    fontSize: 'clamp(34px, 6.2vw, 76px)',
-    lineHeight: 1,
-  },
-  heroText: {
-    margin: 0,
-    maxWidth: 760,
-    color: '#ded7c8',
-    fontSize: 'clamp(18px, 2.4vw, 28px)',
-    lineHeight: 1.35,
-  },
-  bigSentence: {
-    margin: 0,
-    maxWidth: 920,
-    color: '#ded7c8',
-    fontSize: 'clamp(22px, 3.2vw, 38px)',
-    lineHeight: 1.22,
-  },
-  text: {
-    margin: 0,
-    color: '#ded7c8',
-    fontSize: 20,
-    lineHeight: 1.45,
-  },
-  galleryGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gap: 16,
-  },
-  promoCard: {
-    margin: 0,
-    minHeight: 390,
-    border: '1px solid rgba(255,255,255,.16)',
-    borderRadius: 8,
-    overflow: 'hidden',
-    background: '#0d1513',
-    boxShadow: '0 22px 48px rgba(0,0,0,.24)',
-  },
-  promoImage: {
-    width: '100%',
-    height: 270,
-    objectFit: 'cover',
-    display: 'block',
-  },
-  promoCaption: {
-    display: 'grid',
-    gap: 8,
-    padding: 16,
-    color: '#ded7c8',
-    lineHeight: 1.35,
-  },
-  videoFrame: {
-    position: 'relative',
-    minHeight: 420,
-    aspectRatio: '16 / 9',
-    borderRadius: 8,
-    overflow: 'hidden',
-    border: '1px solid rgba(255,255,255,.18)',
-    background: '#0c1110',
-    boxShadow: '0 24px 70px rgba(0,0,0,.32)',
-  },
-  gameplayVideo: {
-    width: '100%',
-    height: '100%',
-    minHeight: 420,
-    objectFit: 'cover',
-    display: 'block',
-    background: '#0c1110',
-  },
-  videoOverlay: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    top: 16,
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 8,
-    pointerEvents: 'none',
-  },
-  videoOverlayBadge: {
-    padding: '8px 10px',
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.18)',
-    background: 'rgba(10,14,12,.74)',
-    color: '#f8f4ea',
-    fontWeight: 900,
-    fontSize: 13,
-  },
-  playCircle: {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    width: 82,
-    height: 82,
-    display: 'grid',
-    placeItems: 'center',
-    transform: 'translate(-50%, -50%)',
-    borderRadius: '50%',
-    border: '1px solid rgba(255,255,255,.32)',
-    background: 'rgba(255,211,123,.95)',
-    color: '#17120b',
-    fontSize: 30,
-    boxShadow: '0 0 36px rgba(255,211,123,.36)',
-  },
-  replayButton: {
-    position: 'absolute',
-    right: 16,
-    top: 64,
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.2)',
-    background: 'rgba(10,14,12,.72)',
-    color: '#f8f4ea',
-  },
-  callToAction: {
-    margin: '16px 0 20px',
-    maxWidth: 640,
-    color: '#ded7c8',
-    fontSize: 'clamp(22px, 3vw, 34px)',
-    lineHeight: 1.18,
-    fontWeight: 800,
-  },
-  mobileLink: {
-    color: '#70d6ff',
-    wordBreak: 'break-all',
-    fontWeight: 800,
-  },
-  qrCard: {
-    display: 'grid',
-    gap: 10,
-    justifyItems: 'center',
-    padding: 16,
-    borderRadius: 8,
-    background: '#f8f4ea',
-    color: '#1b1b1b',
-  },
-  qrImage: {
-    width: '100%',
-    maxWidth: 320,
-    aspectRatio: '1 / 1',
-  },
-  qrCaption: {
-    textAlign: 'center',
-    fontWeight: 800,
-  },
-  footer: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: 10,
-  },
-  footerButton: {
-    borderRadius: 8,
-    background: 'rgba(255,255,255,.09)',
-    color: '#f8f4ea',
-  },
-  footerButtonPrimary: {
-    borderRadius: 8,
-    background: '#ffd37b',
-    color: '#1c160a',
-  },
-};
