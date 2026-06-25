@@ -10,6 +10,7 @@ const outPath = join(root, 'public', 'presentation', 'qasqyr-gameplay-recording.
 const tmpDir = join(root, 'tmp');
 const audioPath = join(tmpDir, 'slide5-original-synthpop.wav');
 const durationSeconds = 45;
+const gameplayStartSeconds = 60;
 const sampleRate = 48000;
 
 mkdirSync(tmpDir, { recursive: true });
@@ -133,15 +134,13 @@ const hasGameplay = existsSync(gameplayPath);
 const args = hasGameplay
   ? [
       '-y',
-      '-i', sourcePath,
+      '-ss', String(gameplayStartSeconds),
       '-i', gameplayPath,
       '-i', audioPath,
       '-filter_complex',
-      `[0:v]trim=0:27,setpts=PTS-STARTPTS,${commonVideo}[intro];` +
-        `[1:v]trim=0:18,setpts=PTS-STARTPTS,${commonVideo}[gameplay];` +
-        '[intro][gameplay]concat=n=2:v=1:a=0[v]',
+      `[0:v]${commonVideo},tpad=stop_mode=clone:stop_duration=${durationSeconds},trim=0:${durationSeconds},setpts=PTS-STARTPTS[v]`,
       '-map', '[v]',
-      '-map', '2:a:0',
+      '-map', '1:a:0',
       '-t', String(durationSeconds),
       '-c:v', 'libvpx-vp9',
       '-b:v', '3200k',

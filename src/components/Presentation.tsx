@@ -158,9 +158,9 @@ export function PresentationPage() {
               key={demoPlaying ? 'gameplay-playing' : 'gameplay-paused'}
               src={GAMEPLAY_VIDEO_SRC}
               poster="/presentation/qasqyr-generated-dialogue.png"
-              controls={demoPlaying}
+              controls={false}
               autoPlay={demoPlaying}
-              muted
+              muted={!demoPlaying}
               loop
               playsInline
             />
