@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "video:gameplay": "node scripts/record-gameplay.mjs",
     "video:trailer": "node scripts/generate-gameplay-trailer.mjs",
+    "video:cinematic": "node scripts/generate-cinematic-still-trailer.mjs",
     "db:login": "supabase login",
     "db:link": "supabase link",
     "db:new": "supabase migration new",

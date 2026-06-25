@@ -29,7 +29,7 @@ const promoShots: PromoShot[] = [
   },
   {
     title: 'Геймплей',
-    src: '/presentation/qasqyr-gameplay-3d.png',
+    src: '/presentation/qasqyr-generated-vista.png',
     caption: 'Игрок и AI-напарник проходят карту и сражаются с врагами.',
   },
 ];
@@ -165,7 +165,7 @@ export function PresentationPage() {
               key={demoPlaying ? 'gameplay-playing' : 'gameplay-paused'}
               style={styles.gameplayVideo}
               src={GAMEPLAY_VIDEO_SRC}
-              poster="/presentation/qasqyr-gameplay-3d.png"
+              poster="/presentation/qasqyr-generated-dialogue.png"
               controls={demoPlaying}
               autoPlay={demoPlaying}
               muted
