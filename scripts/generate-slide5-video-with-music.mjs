@@ -1,10 +1,11 @@
 import ffmpeg from '@ffmpeg-installer/ffmpeg';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const root = process.cwd();
 const sourcePath = join(root, 'public', 'presentation', 'qasqyr-slide5-source.mp4');
+const gameplayPath = join(root, 'tmp', 'slide5-gameplay-capture.webm');
 const outPath = join(root, 'public', 'presentation', 'qasqyr-gameplay-recording.webm');
 const tmpDir = join(root, 'tmp');
 const audioPath = join(tmpDir, 'slide5-original-synthpop.wav');
@@ -127,27 +128,53 @@ function writeWav(path) {
 
 writeWav(audioPath);
 
-const args = [
-  '-y',
-  '-i', sourcePath,
-  '-i', audioPath,
-  '-t', String(durationSeconds),
-  '-map', '0:v:0',
-  '-map', '1:a:0',
-  '-vf', 'scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,eq=contrast=1.16:saturation=1.22:brightness=-0.025:gamma=0.96,vignette=PI/5',
-  '-c:v', 'libvpx-vp9',
-  '-b:v', '4500k',
-  '-crf', '26',
-  '-row-mt', '1',
-  '-c:a', 'libopus',
-  '-b:a', '160k',
-  '-shortest',
-  outPath,
-];
+const commonVideo = 'scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,setsar=1,eq=contrast=1.16:saturation=1.22:brightness=-0.025:gamma=0.96,vignette=PI/5,fps=30,format=yuv420p';
+const hasGameplay = existsSync(gameplayPath);
+const args = hasGameplay
+  ? [
+      '-y',
+      '-i', sourcePath,
+      '-i', gameplayPath,
+      '-i', audioPath,
+      '-filter_complex',
+      `[0:v]trim=0:27,setpts=PTS-STARTPTS,${commonVideo}[intro];` +
+        `[1:v]trim=0:18,setpts=PTS-STARTPTS,${commonVideo}[gameplay];` +
+        '[intro][gameplay]concat=n=2:v=1:a=0[v]',
+      '-map', '[v]',
+      '-map', '2:a:0',
+      '-t', String(durationSeconds),
+      '-c:v', 'libvpx-vp9',
+      '-b:v', '3200k',
+      '-crf', '31',
+      '-row-mt', '1',
+      '-deadline', 'good',
+      '-c:a', 'libopus',
+      '-b:a', '128k',
+      '-shortest',
+      outPath,
+    ]
+  : [
+      '-y',
+      '-i', sourcePath,
+      '-i', audioPath,
+      '-t', String(durationSeconds),
+      '-map', '0:v:0',
+      '-map', '1:a:0',
+      '-vf', commonVideo,
+      '-c:v', 'libvpx-vp9',
+      '-b:v', '3200k',
+      '-crf', '31',
+      '-row-mt', '1',
+      '-deadline', 'good',
+      '-c:a', 'libopus',
+      '-b:a', '128k',
+      '-shortest',
+      outPath,
+    ];
 
 const result = spawnSync(ffmpeg.path, args, { stdio: 'inherit' });
 if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 
-console.log(`Wrote ${outPath} (${durationSeconds}s)`);
+console.log(`Wrote ${outPath} (${durationSeconds}s, gameplay=${hasGameplay ? 'yes' : 'no'})`);
