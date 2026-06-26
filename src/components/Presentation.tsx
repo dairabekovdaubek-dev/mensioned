@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 type Slide = {
   id: number;
@@ -19,22 +21,23 @@ type GalleryShot = {
 
 const APP_NAME = 'QASQYR 3D';
 const MOBILE_GAME_URL = 'https://mensioned.vercel.app/mobile?v=graphics-20260624';
-const GAMEPLAY_VIDEO_SRC = '/presentation/qasqyr-gameplay-recording.webm';
+const GAMEPLAY_VIDEO_SRC = '/presentation/qasqyr-gameplay-cinematic.webm';
+const GAMEPLAY_VIDEO_POSTER = '/presentation/qasqyr-gameplay-cinematic-poster.png';
 
 const galleryShots: GalleryShot[] = [
   {
     title: 'Атмосфера мира',
-    src: '/presentation/qasqyr-menu-3d.png',
+    src: '/presentation/qasqyr-game-shot-01.png',
     text: 'Степь, вода, горы, деревня и опасные маршруты для выживания.',
   },
   {
     title: 'Сражение',
-    src: '/presentation/qasqyr-generated-zombie-combat.png',
+    src: '/presentation/qasqyr-game-shot-02.png',
     text: 'Игрок сражается с врагами и защищает путь вместе с AI-напарником.',
   },
   {
     title: 'Скины и прогресс',
-    src: '/presentation/qasqyr-skins-3d.png',
+    src: '/presentation/qasqyr-game-shot-03.png',
     text: 'Ножи, кейсы, золото, алмазы и визуальные награды за прохождение.',
   },
 ];
@@ -157,13 +160,16 @@ export function PresentationPage() {
             <video
               key={demoPlaying ? 'gameplay-playing' : 'gameplay-paused'}
               src={GAMEPLAY_VIDEO_SRC}
-              poster="/presentation/qasqyr-generated-dialogue.png"
+              poster={GAMEPLAY_VIDEO_POSTER}
               controls={false}
               autoPlay={demoPlaying}
               muted={!demoPlaying}
               loop
               playsInline
             />
+            <div className="cinema-grade" />
+            <ModelOverlay src="/models/outfits/fantasy/Male_Ranger.gltf" className="model-left" />
+            <ModelOverlay src="/models/outfits/fantasy/Female_Ranger.gltf" className="model-right" />
             {!demoPlaying && (
               <button type="button" className="play-button" onClick={() => setDemoPlaying(true)} aria-label="Запустить видео">
                 Play
@@ -233,6 +239,91 @@ export function PresentationPage() {
       </footer>
     </main>
   );
+}
+
+function ModelOverlay({ src, className }: { src: string; className: string }) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return undefined;
+
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    mount.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 100);
+    camera.position.set(0, 1.25, 4.6);
+
+    scene.add(new THREE.HemisphereLight(0xdff6ff, 0x1f1711, 2.2));
+    const keyLight = new THREE.DirectionalLight(0xffdf9a, 3.4);
+    keyLight.position.set(2.8, 4.2, 3.2);
+    scene.add(keyLight);
+    const rimLight = new THREE.DirectionalLight(0x70d6ff, 2);
+    rimLight.position.set(-3, 2.5, -2);
+    scene.add(rimLight);
+
+    const root = new THREE.Group();
+    scene.add(root);
+
+    const resize = () => {
+      const rect = mount.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+    };
+
+    let frame = 0;
+    let disposed = false;
+
+    new GLTFLoader().load(src, (gltf) => {
+      if (disposed) return;
+      const model = gltf.scene;
+      const box = new THREE.Box3().setFromObject(model);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const maxAxis = Math.max(size.x, size.y, size.z) || 1;
+      model.position.sub(center);
+      model.scale.setScalar(2.45 / maxAxis);
+      model.rotation.y = -0.45;
+      root.add(model);
+    });
+
+    const animate = () => {
+      if (disposed) return;
+      root.rotation.y += 0.006;
+      renderer.render(scene, camera);
+      frame = window.requestAnimationFrame(animate);
+    };
+
+    resize();
+    animate();
+    window.addEventListener('resize', resize);
+
+    return () => {
+      disposed = true;
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', resize);
+      root.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        mesh.geometry?.dispose();
+        const material = mesh.material;
+        if (Array.isArray(material)) {
+          material.forEach((item) => item.dispose());
+        } else {
+          material?.dispose();
+        }
+      });
+      renderer.dispose();
+      renderer.domElement.remove();
+    };
+  }, [src]);
+
+  return <div ref={mountRef} className={`model-stage ${className}`} aria-hidden="true" />;
 }
 
 function PresentationStyles() {
@@ -560,9 +651,9 @@ function PresentationStyles() {
         overflow: hidden;
         aspect-ratio: 16 / 9;
         border-radius: 8px;
-        border: 10px solid rgba(74, 103, 130, .22);
+        border: 10px solid rgba(26, 42, 57, .42);
         background: #0d1218;
-        box-shadow: 0 18px 42px rgba(76, 97, 115, .22);
+        box-shadow: 0 24px 58px rgba(15, 24, 31, .38), 0 0 0 1px rgba(255, 245, 205, .2);
       }
 
       .video-frame video {
@@ -572,8 +663,47 @@ function PresentationStyles() {
         display: block;
       }
 
+      .cinema-grade {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        pointer-events: none;
+        background:
+          linear-gradient(180deg, rgba(0,0,0,.56) 0 9%, transparent 20% 78%, rgba(0,0,0,.62) 91% 100%),
+          radial-gradient(circle at 18% 18%, rgba(112, 214, 255, .18), transparent 30%),
+          radial-gradient(circle at 78% 26%, rgba(255, 211, 123, .2), transparent 24%),
+          linear-gradient(90deg, rgba(4,9,13,.35), transparent 20% 74%, rgba(4,9,13,.42));
+        mix-blend-mode: soft-light;
+      }
+
+      .model-stage {
+        position: absolute;
+        z-index: 3;
+        bottom: -9%;
+        width: 22%;
+        height: 54%;
+        pointer-events: none;
+        filter: drop-shadow(0 18px 24px rgba(0,0,0,.46)) saturate(1.08);
+      }
+
+      .model-stage canvas {
+        width: 100% !important;
+        height: 100% !important;
+        display: block;
+      }
+
+      .model-left {
+        left: -3%;
+      }
+
+      .model-right {
+        right: -2%;
+        transform: scaleX(-1);
+      }
+
       .play-button {
         position: absolute;
+        z-index: 4;
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
@@ -637,6 +767,10 @@ function PresentationStyles() {
         .image-note img,
         .gallery-card img {
           height: 220px;
+        }
+
+        .model-stage {
+          display: none;
         }
 
         h1 {
