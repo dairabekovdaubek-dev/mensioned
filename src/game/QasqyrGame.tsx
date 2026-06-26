@@ -238,7 +238,7 @@ const USE_WORLD_TEXTURE_ASSETS = true;
 const USE_WORLD_RUNTIME_ASSETS = true;
 const USE_MEDIEVAL_FBX_HOUSES = false;
 const MEDIEVAL_PROP_SCALE = 0.28;
-const HOUSE_WORLD_SCALE = 0.72;
+const HOUSE_WORLD_SCALE = 0.11;
 const COMPANION_HOUSE: HouseNpc = {
   id: 99,
   name: 'Саят',
@@ -3264,13 +3264,13 @@ export function QasqyrGame({
       house.scale.setScalar(HOUSE_WORLD_SCALE);
       scene.add(house);
       placedHouses.push({ npc, mesh: house, replaced: false });
-      addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 3.8, kind: 'solid' });
+      addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 0.85, kind: 'solid' });
       const windowGlow = new THREE.PointLight(npc.mood === 'evil' ? 0xb84230 : 0xffc978, npc.mood === 'evil' ? 1.15 : 0.9, 18, 2.1);
-      windowGlow.position.set(npc.x, 1.85, npc.z - 3.35);
+      windowGlow.position.set(npc.x, 0.35, npc.z - 0.45);
       scene.add(windowGlow);
 
       const figure = makeNpcFigure(npc.mood);
-      figure.position.set(npc.x, 0, npc.z - 3.55);
+      figure.position.set(npc.x, 0, npc.z - 1.25);
       scene.add(figure);
       npcFigures.push({ npc, mesh: figure });
     }
@@ -3280,12 +3280,12 @@ export function QasqyrGame({
     companionHouse.scale.setScalar(HOUSE_WORLD_SCALE);
     scene.add(companionHouse);
     placedHouses.push({ npc: COMPANION_HOUSE, mesh: companionHouse, replaced: false });
-    addObstacle({ key: 'companion-house', x: COMPANION_HOUSE.x, z: COMPANION_HOUSE.z, radius: 3.8, kind: 'solid' });
+    addObstacle({ key: 'companion-house', x: COMPANION_HOUSE.x, z: COMPANION_HOUSE.z, radius: 0.85, kind: 'solid' });
     const companionDoorGlow = new THREE.PointLight(0x8cffb8, 1.25, 20, 2);
-    companionDoorGlow.position.set(COMPANION_HOUSE.x, 1.88, COMPANION_HOUSE.z - 3.35);
+    companionDoorGlow.position.set(COMPANION_HOUSE.x, 0.35, COMPANION_HOUSE.z - 0.45);
     scene.add(companionDoorGlow);
     const companionHouseFigure = makeNpcFigure(COMPANION_HOUSE.mood);
-    companionHouseFigure.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z - 3.55);
+    companionHouseFigure.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z - 1.25);
     scene.add(companionHouseFigure);
     npcFigures.push({ npc: COMPANION_HOUSE, mesh: companionHouseFigure });
 
@@ -3449,9 +3449,6 @@ export function QasqyrGame({
     runtimePlayerOutfit.mesh.position.set(0, -0.08, 0.04);
     player.add(runtimePlayerOutfit.mesh);
     for (const limb of runtimePlayerOutfit.walkParts) playerWalkParts.push(limb);
-    for (const part of [playerBody, shirtFront, playerHead, hair, nose, leftEye, rightEye, mouth, hat, belt, pack, scarf]) {
-      part.visible = false;
-    }
     scene.add(player);
     const gltfLoader = new GLTFLoader();
     const fbxLoader = new FBXLoader();
@@ -3547,9 +3544,6 @@ export function QasqyrGame({
       const importedOutfit = makeOutfitInstance(template, 'player');
       importedOutfit.position.set(0, -0.08 + (Number(importedOutfit.userData.groundLift) || 0), 0.04);
       importedOutfit.rotation.y = Math.PI;
-      if (runtimePlayerOutfit.mesh.parent === player) {
-        player.remove(runtimePlayerOutfit.mesh);
-      }
       player.add(importedOutfit);
       outfitModel = importedOutfit;
       attachPlayerAnimator();
@@ -4389,7 +4383,7 @@ export function QasqyrGame({
       const stormPenalty = activeEvent === 'storm' ? 0.64 : 1;
       const dimensionSpeed = inHloddev ? 1.32 : 1;
       const keys = keysRef.current;
-      const strafe = (keys.has('d') ? 1 : 0) - (keys.has('a') ? 1 : 0);
+      const strafe = (keys.has('a') ? 1 : 0) - (keys.has('d') ? 1 : 0);
       const forwardInput = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
       const hasMoveInput = strafe !== 0 || forwardInput !== 0;
       const sneak = keys.has('control') || keys.has('c');
@@ -4447,14 +4441,14 @@ export function QasqyrGame({
         for (const npc of houseNpcsRef.current) {
           if (npc.visited) continue;
           const dist = Math.hypot(playerRef.current.x - npc.x, playerRef.current.z - npc.z);
-          if (dist < 8.5) {
+          if (dist < 3.2) {
             enterHouse(npc);
             break;
           }
         }
         if (!insideHouseRef.current && traderCoordsBoughtRef.current && !companionRecruitedRef.current) {
           const dist = Math.hypot(playerRef.current.x - COMPANION_HOUSE.x, playerRef.current.z - COMPANION_HOUSE.z);
-          if (dist < 8.5) enterHouse(COMPANION_HOUSE);
+          if (dist < 3.2) enterHouse(COMPANION_HOUSE);
         }
       }
       const companionHouseNpcFigure = npcFigures.find((entry) => entry.npc.id === COMPANION_HOUSE.id)?.mesh ?? companionHouseFigure;
@@ -5234,7 +5228,7 @@ export function QasqyrGame({
         </div>
       )}
       {phase === 'won' && <ZombieCongratsPhoto score={hud.score} />}
-      {phase === 'playing' && assetLoading && (
+      {phase === 'playing' && assetLoading && !preloadDone && (
         <div style={styles.loadingOverlay}>
           <div style={styles.loadingPanel}>
             <b>У вас лагает компьютер, подождите загрузку</b>
