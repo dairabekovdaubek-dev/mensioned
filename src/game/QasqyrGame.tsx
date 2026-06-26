@@ -236,6 +236,9 @@ const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/
 const USE_CHARACTER_RUNTIME_ASSETS = true;
 const USE_WORLD_TEXTURE_ASSETS = true;
 const USE_WORLD_RUNTIME_ASSETS = true;
+const USE_MEDIEVAL_FBX_HOUSES = false;
+const MEDIEVAL_PROP_SCALE = 0.28;
+const HOUSE_WORLD_SCALE = 0.72;
 const COMPANION_HOUSE: HouseNpc = {
   id: 99,
   name: 'Саят',
@@ -645,6 +648,15 @@ function fitAssetMaxSpan(asset: THREE.Object3D, targetSpan: number) {
   asset.scale.multiplyScalar(targetSpan / span);
 }
 
+function clampAssetMaxSpan(asset: THREE.Object3D, maxSpan: number) {
+  asset.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(asset);
+  const size = bounds.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z);
+  if (!Number.isFinite(span) || span <= 0 || span <= maxSpan) return;
+  asset.scale.multiplyScalar(maxSpan / span);
+}
+
 function centerAssetOnGround(asset: THREE.Object3D) {
   asset.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(asset);
@@ -807,9 +819,9 @@ function makeOutfitInstance(template: THREE.Group, role: OutfitRole) {
         } else {
           material.color.multiplyScalar(1.18);
           material.metalness = Math.min(0.2, material.metalness + 0.04);
-          material.transparent = true;
-          material.opacity = 0.72;
-          material.depthWrite = false;
+          material.transparent = false;
+          material.opacity = 1;
+          material.depthWrite = true;
         }
       }
     }
@@ -818,9 +830,10 @@ function makeOutfitInstance(template: THREE.Group, role: OutfitRole) {
   const bounds = new THREE.Box3().setFromObject(outfit);
   const size = bounds.getSize(new THREE.Vector3());
   if (Number.isFinite(size.y) && size.y > 0.01) {
-    const targetHeight = role === 'player' ? 1.82 : role === 'enemy' ? 2.62 : 2.58;
-    const scale = clamp(targetHeight / size.y, 0.018, 1.45);
+    const targetHeight = role === 'player' ? 1.72 : role === 'enemy' ? 2.12 : 1.86;
+    const scale = clamp(targetHeight / size.y, 0.003, 0.75);
     outfit.scale.multiplyScalar(scale);
+    clampAssetMaxSpan(outfit, role === 'player' ? 1.55 : role === 'enemy' ? 1.75 : 1.55);
     outfit.updateMatrixWorld(true);
     const scaledBounds = new THREE.Box3().setFromObject(outfit);
     outfit.userData.groundLift = -scaledBounds.min.y;
@@ -876,9 +889,14 @@ function prepareMedievalTemplate(template: THREE.Group, kind: string) {
           if (material.map) {
             material.map.colorSpace = THREE.SRGBColorSpace;
             material.map.anisotropy = 8;
+            material.color.setHex(0xffffff);
           }
           material.transparent = false;
           material.depthWrite = true;
+          material.opacity = 1;
+          if (material instanceof THREE.MeshStandardMaterial) {
+            material.roughness = Math.min(0.95, Math.max(0.45, material.roughness));
+          }
         }
       }
     } else {
@@ -920,6 +938,7 @@ function prepareMedievalTemplate(template: THREE.Group, kind: string) {
                       key.includes('chimney') || key.includes('support') ? 1.75 :
                         key.includes('vine') ? 1.8 : 2.2;
   fitAssetHeight(template, targetHeight);
+  clampAssetMaxSpan(template, 4.8);
   centerAssetOnGround(template);
   enableAssetShadows(template);
   template.userData.medievalKind = kind;
@@ -1563,8 +1582,8 @@ function makeMountain() {
   const rockMat = new THREE.MeshStandardMaterial({ color: 0x73736b, map: textures.rockyTerrain, bumpMap: textures.rockMoss, bumpScale: 0.16, roughness: 0.98, flatShading: true });
   const mossMat = new THREE.MeshStandardMaterial({ color: 0x66775e, map: textures.rockMoss, bumpMap: textures.rock, bumpScale: 0.09, roughness: 0.98, flatShading: true });
   const snowMat = new THREE.MeshStandardMaterial({ color: 0xd9e5e2, map: textures.snow, bumpMap: textures.snow, bumpScale: 0.025, roughness: 0.82, flatShading: true });
-  const height = randomRange(9, 18);
-  const base = randomRange(7, 14);
+  const height = randomRange(4.5, 8.5);
+  const base = randomRange(3.5, 6.2);
   const peak = new THREE.Mesh(new THREE.ConeGeometry(base, height, 6), rockMat);
   peak.position.y = height / 2;
   peak.rotation.y = randomRange(0, Math.PI);
@@ -2316,9 +2335,9 @@ function makeWorldChunk(cx: number, cz: number) {
     for (let i = 0; i < count; i++) {
       const mountain = makeMountain();
       mountain.position.set(chunkRandom(cx, cz, i + 10, -32, 32), 0, chunkRandom(cx, cz, i + 20, -32, 32));
-      const scale = chunkRandom(cx, cz, i + 30, 0.7, 1.45);
+      const scale = chunkRandom(cx, cz, i + 30, 0.38, 0.78);
       mountain.scale.setScalar(scale);
-      obstacles.push({ x: mountain.position.x, z: mountain.position.z, radius: 4.8 * scale, kind: 'solid' });
+      obstacles.push({ x: mountain.position.x, z: mountain.position.z, radius: 2.8 * scale, kind: 'solid' });
       group.add(mountain);
     }
     const treeCount = 2 + Math.floor(hash2(cx, cz, 1230) * 3);
@@ -2713,7 +2732,17 @@ function playJumpscareSfx() {
   }
 }
 
-export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () => void }) {
+export function QasqyrGame({
+  userId,
+  preloadProgress = 100,
+  preloadDone = true,
+  onExit,
+}: {
+  userId?: string;
+  preloadProgress?: number;
+  preloadDone?: boolean;
+  onExit?: () => void;
+}) {
   const isMobile = useMobileLayout();
   const isPortrait = usePortraitLayout();
   const mountRef = useRef<HTMLDivElement>(null);
@@ -3232,29 +3261,31 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       const house = makeHouse(npc.mood);
       house.position.set(npc.x, 0, npc.z);
       house.rotation.y = npc.x < 0 ? -0.28 : 0.28;
+      house.scale.setScalar(HOUSE_WORLD_SCALE);
       scene.add(house);
       placedHouses.push({ npc, mesh: house, replaced: false });
-      addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 5.2, kind: 'solid' });
+      addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 3.8, kind: 'solid' });
       const windowGlow = new THREE.PointLight(npc.mood === 'evil' ? 0xb84230 : 0xffc978, npc.mood === 'evil' ? 1.15 : 0.9, 18, 2.1);
-      windowGlow.position.set(npc.x, 2.55, npc.z - 4.6);
+      windowGlow.position.set(npc.x, 1.85, npc.z - 3.35);
       scene.add(windowGlow);
 
       const figure = makeNpcFigure(npc.mood);
-      figure.position.set(npc.x, 0, npc.z - 4.8);
+      figure.position.set(npc.x, 0, npc.z - 3.55);
       scene.add(figure);
       npcFigures.push({ npc, mesh: figure });
     }
     const companionHouse = makeHouse(COMPANION_HOUSE.mood);
     companionHouse.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z);
     companionHouse.rotation.y = 0.18;
+    companionHouse.scale.setScalar(HOUSE_WORLD_SCALE);
     scene.add(companionHouse);
     placedHouses.push({ npc: COMPANION_HOUSE, mesh: companionHouse, replaced: false });
-    addObstacle({ key: 'companion-house', x: COMPANION_HOUSE.x, z: COMPANION_HOUSE.z, radius: 5.2, kind: 'solid' });
+    addObstacle({ key: 'companion-house', x: COMPANION_HOUSE.x, z: COMPANION_HOUSE.z, radius: 3.8, kind: 'solid' });
     const companionDoorGlow = new THREE.PointLight(0x8cffb8, 1.25, 20, 2);
-    companionDoorGlow.position.set(COMPANION_HOUSE.x, 2.6, COMPANION_HOUSE.z - 4.6);
+    companionDoorGlow.position.set(COMPANION_HOUSE.x, 1.88, COMPANION_HOUSE.z - 3.35);
     scene.add(companionDoorGlow);
     const companionHouseFigure = makeNpcFigure(COMPANION_HOUSE.mood);
-    companionHouseFigure.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z - 4.8);
+    companionHouseFigure.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z - 3.55);
     scene.add(companionHouseFigure);
     npcFigures.push({ npc: COMPANION_HOUSE, mesh: companionHouseFigure });
 
@@ -3512,12 +3543,15 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       }
     };
     const attachPlayerOutfit = (template: THREE.Group) => {
-      void template;
       if (outfitModel) return;
-      // The marketplace outfit meshes include wide cloak/card shapes that can cover
-      // the third-person camera. Keep the stable runtime player and use imported
-      // animated outfits for NPCs, enemies and the companion instead.
-      outfitModel = runtimePlayerOutfit.mesh;
+      const importedOutfit = makeOutfitInstance(template, 'player');
+      importedOutfit.position.set(0, -0.08 + (Number(importedOutfit.userData.groundLift) || 0), 0.04);
+      importedOutfit.rotation.y = Math.PI;
+      if (runtimePlayerOutfit.mesh.parent === player) {
+        player.remove(runtimePlayerOutfit.mesh);
+      }
+      player.add(importedOutfit);
+      outfitModel = importedOutfit;
       attachPlayerAnimator();
     };
     const attachBestLoadedPlayerOutfit = () => {
@@ -3756,6 +3790,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       return group;
     };
     const replaceProceduralHousesWithFbx = () => {
+      if (!USE_MEDIEVAL_FBX_HOUSES) return;
       for (const entry of placedHouses) {
         if (entry.replaced) continue;
         const replacement = makeMedievalKitHouse(entry.npc);
@@ -3772,7 +3807,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       const prop = makeAssetInstance(template);
       prop.position.set(x, terrainHeightAt(x, z), z);
       prop.rotation.y = rotation;
-      prop.scale.setScalar(scale);
+      prop.scale.setScalar(scale * MEDIEVAL_PROP_SCALE);
       scene.add(prop);
     };
     const placeMedievalDecor = (kind: MedievalPropKind) => {
@@ -3809,7 +3844,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       const prop = makeAssetInstance(template);
       prop.position.set(x, terrainHeightAt(x, z), z);
       prop.rotation.y = rotation;
-      prop.scale.setScalar(scale);
+      prop.scale.setScalar(scale * MEDIEVAL_PROP_SCALE);
       scene.add(prop);
     };
     const placeMedievalExtraDecor = (kind: MedievalExtraPropKind) => {
@@ -4207,8 +4242,25 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
 
     void useMedkit;
 
+    const normalizeGameKey = (e: KeyboardEvent) => {
+      if (e.code === 'KeyW') return 'w';
+      if (e.code === 'KeyA') return 'a';
+      if (e.code === 'KeyS') return 's';
+      if (e.code === 'KeyD') return 'd';
+      if (e.code === 'KeyE') return 'e';
+      if (e.code === 'KeyC') return 'c';
+      if (e.code === 'ControlLeft' || e.code === 'ControlRight') return 'control';
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') return 'shift';
+      if (e.code === 'Space') return ' ';
+      if (e.code === 'ArrowUp') return 'arrowup';
+      if (e.code === 'ArrowDown') return 'arrowdown';
+      if (e.code === 'ArrowLeft') return 'arrowleft';
+      if (e.code === 'ArrowRight') return 'arrowright';
+      return e.key.toLowerCase();
+    };
+
     const keyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
+      const key = normalizeGameKey(e);
       if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(key)) e.preventDefault();
       if (key === 'escape') {
         setPhase('intro');
@@ -4235,7 +4287,7 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
       keysRef.current.add(key);
     };
     const keyUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
+      const key = normalizeGameKey(e);
       keysRef.current.delete(key);
       if (key === 'shift') {
         if (document.pointerLockElement === renderer.domElement) document.exitPointerLock?.();
@@ -4853,7 +4905,10 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
     }
   };
 
+  const canStartGame = progressLoaded && preloadDone;
+
   const handleMainPlay = () => {
+    if (!canStartGame) return;
     if (phase === 'intro') {
       openTutorial();
       return;
@@ -5403,8 +5458,8 @@ export function QasqyrGame({ userId, onExit }: { userId?: string; onExit?: () =>
             </div>
           )}
           <div style={styles.controls}>{isMobile ? 'На телефоне используй экранные кнопки: движение, удар, бег, предмет и Хлоддев.' : 'WASD - движение · мышь - прицел · клик - удар · Space - Хлоддев · Esc - выход'}</div>
-          <button type="button" onClick={handleMainPlay} disabled={!progressLoaded} style={{ ...styles.play, ...(isMobile ? styles.playMobile : null) }}>
-            {!progressLoaded ? 'Загрузка...' : phase === 'intro' ? (savedGameState ? 'Продолжить' : 'Играть') : phase === 'tutorial' ? 'Понятно, начать' : 'Еще раз'}
+          <button type="button" onClick={handleMainPlay} disabled={!canStartGame} style={{ ...styles.play, ...(isMobile ? styles.playMobile : null) }}>
+            {!progressLoaded ? 'Загрузка...' : !preloadDone ? `Загрузка моделей ${preloadProgress}%` : phase === 'intro' ? (savedGameState ? 'Продолжить' : 'Играть') : phase === 'tutorial' ? 'Старт' : 'Заново'}
           </button>
         </section>
       )}

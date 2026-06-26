@@ -33,7 +33,14 @@ export default function App() {
   }
 
   if (path === '/mobile') {
-    return <QasqyrGame userId={session?.user.id} onExit={() => window.location.assign('/')} />;
+    return (
+      <QasqyrGame
+        userId={session?.user.id}
+        preloadProgress={preload.progress}
+        preloadDone={preload.done}
+        onExit={() => window.location.assign('/')}
+      />
+    );
   }
 
   if (loading) {
@@ -49,7 +56,7 @@ export default function App() {
       <header className="header">
         <h1>{playing ? 'QASQYR 3D' : 'Мой проект'}</h1>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="ghost" onClick={() => setPlaying((p) => !p)}>
+          <button className="ghost" onClick={() => setPlaying((p) => (p ? false : preload.done))} disabled={!playing && !preload.done}>
             {playing ? 'Назад' : 'Играть'}
           </button>
           {session && (
@@ -61,13 +68,19 @@ export default function App() {
       </header>
 
       {playing ? (
-        <QasqyrGame userId={session?.user.id} onExit={() => setPlaying(false)} />
+        <QasqyrGame
+          userId={session?.user.id}
+          preloadProgress={preload.progress}
+          preloadDone={preload.done}
+          onExit={() => setPlaying(false)}
+        />
       ) : !session ? (
         guestEntered ? (
           <AccountHome
             userEmail="Гость"
             preloadProgress={preload.progress}
             preloadDone={preload.done}
+            preloadFailed={preload.failed}
             onPlay={() => setPlaying(true)}
             onBack={() => setGuestEntered(false)}
           />
@@ -79,6 +92,7 @@ export default function App() {
           userEmail={session.user.email ?? ''}
           preloadProgress={preload.progress}
           preloadDone={preload.done}
+          preloadFailed={preload.failed}
           onPlay={() => setPlaying(true)}
           onBack={() => supabase.auth.signOut()}
         />
@@ -92,12 +106,14 @@ function AccountHome({
   userEmail,
   preloadProgress,
   preloadDone,
+  preloadFailed,
   onPlay,
   onBack,
 }: {
   userEmail: string;
   preloadProgress: number;
   preloadDone: boolean;
+  preloadFailed: number;
   onPlay: () => void;
   onBack: () => void;
 }) {
@@ -111,15 +127,21 @@ function AccountHome({
         <h2 style={accountStyles.title}>Аккаунт готов</h2>
         <p style={accountStyles.text}>{userEmail}</p>
         <div style={accountStyles.preloadBox}>
-          <b>{preloadDone ? 'Модели и текстуры прогружены' : 'Прогружаем модели и текстуры...'}</b>
+          <b>
+            {preloadDone
+              ? preloadFailed > 0
+                ? 'Модели загружены, часть необязательных ассетов пропущена'
+                : 'Модели, анимации и текстуры загружены'
+              : 'Загрузка моделей, анимаций и текстур...'}
+          </b>
           <span>{preloadProgress}%</span>
           <div style={accountStyles.track}>
             <span style={{ ...accountStyles.fill, width: `${preloadProgress}%` }} />
           </div>
         </div>
         <div style={accountStyles.actions}>
-          <button type="button" onClick={onPlay} style={accountStyles.primaryButton}>
-            Играть
+          <button type="button" onClick={onPlay} disabled={!preloadDone} style={{ ...accountStyles.primaryButton, ...(!preloadDone ? accountStyles.disabledButton : null) }}>
+            {preloadDone ? 'Играть' : 'Загрузка'}
           </button>
           <button type="button" onClick={onBack} style={accountStyles.secondaryButton}>
             Назад
@@ -234,6 +256,10 @@ const accountStyles: Record<string, CSSProperties> = {
     padding: '14px 16px',
     fontWeight: 900,
     cursor: 'pointer',
+  },
+  disabledButton: {
+    opacity: 0.55,
+    cursor: 'wait',
   },
   secondaryButton: {
     border: '1px solid rgba(255,255,255,.22)',
