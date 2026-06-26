@@ -237,8 +237,9 @@ const USE_CHARACTER_RUNTIME_ASSETS = true;
 const USE_WORLD_TEXTURE_ASSETS = true;
 const USE_WORLD_RUNTIME_ASSETS = true;
 const USE_MEDIEVAL_FBX_HOUSES = false;
-const MEDIEVAL_PROP_SCALE = 0.12;
-const HOUSE_WORLD_SCALE = 0.48;
+const MEDIEVAL_PROP_SCALE = 0.08;
+const HOUSE_WORLD_SCALE = 0.08;
+const FORTRESS_WORLD_SCALE = 0.1;
 const COMPANION_HOUSE: HouseNpc = {
   id: 99,
   name: 'Саят',
@@ -1471,6 +1472,7 @@ function makeFortress(x: number, z: number, fake = false) {
   }
 
   fortress.position.set(x, 0, z);
+  fortress.scale.setScalar(FORTRESS_WORLD_SCALE);
   return fortress;
 }
 
@@ -2409,7 +2411,7 @@ function makeWorldChunk(cx: number, cz: number) {
       tinyHouse.position.set(chunkRandom(cx, cz, i + 1565, -34, 34), 0, chunkRandom(cx, cz, i + 1585, -34, 34));
       tinyHouse.rotation.y = chunkRandom(cx, cz, i + 1605, -0.55, 0.55);
       tinyHouse.scale.setScalar(HOUSE_WORLD_SCALE);
-      obstacles.push({ x: tinyHouse.position.x, z: tinyHouse.position.z, radius: 2.35, kind: 'solid' });
+      obstacles.push({ x: tinyHouse.position.x, z: tinyHouse.position.z, radius: 0.55, kind: 'solid' });
       group.add(tinyHouse);
     }
   }
@@ -3264,10 +3266,10 @@ export function QasqyrGame({
     const addObstacle = (obstacle: PhysicsObstacle) => physicsObstacles.push(obstacle);
 
     scene.add(makeFortress(0, FINISH_Z - 10, false));
-    addObstacle({ key: 'fortress-real', x: 0, z: FINISH_Z - 10, radius: 10, kind: 'solid' });
+    addObstacle({ key: 'fortress-real', x: 0, z: FINISH_Z - 10, radius: 1.1, kind: 'solid' });
     for (const fake of fakeFortressesRef.current) {
       scene.add(makeFortress(fake.x, fake.z, true));
-      addObstacle({ key: `fake-${fake.id}`, x: fake.x, z: fake.z, radius: 8, kind: 'solid' });
+      addObstacle({ key: `fake-${fake.id}`, x: fake.x, z: fake.z, radius: 0.9, kind: 'solid' });
     }
     for (const npc of houseNpcsRef.current) {
       const house = makeHouse(npc.mood);
@@ -3276,13 +3278,13 @@ export function QasqyrGame({
       house.scale.setScalar(HOUSE_WORLD_SCALE);
       scene.add(house);
       placedHouses.push({ npc, mesh: house, replaced: false });
-      addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 2.35, kind: 'solid' });
+      addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 0.55, kind: 'solid' });
       const windowGlow = new THREE.PointLight(npc.mood === 'evil' ? 0xb84230 : 0xffc978, npc.mood === 'evil' ? 1.15 : 0.9, 18, 2.1);
-      windowGlow.position.set(npc.x, 1.2, npc.z - 2.2);
+      windowGlow.position.set(npc.x, 0.22, npc.z - 0.36);
       scene.add(windowGlow);
 
       const figure = makeNpcFigure(npc.mood);
-      figure.position.set(npc.x, 0, npc.z - 2.65);
+      figure.position.set(npc.x, 0, npc.z - 0.9);
       scene.add(figure);
       npcFigures.push({ npc, mesh: figure });
     }
@@ -3292,12 +3294,12 @@ export function QasqyrGame({
     companionHouse.scale.setScalar(HOUSE_WORLD_SCALE);
     scene.add(companionHouse);
     placedHouses.push({ npc: COMPANION_HOUSE, mesh: companionHouse, replaced: false });
-    addObstacle({ key: 'companion-house', x: COMPANION_HOUSE.x, z: COMPANION_HOUSE.z, radius: 2.35, kind: 'solid' });
+    addObstacle({ key: 'companion-house', x: COMPANION_HOUSE.x, z: COMPANION_HOUSE.z, radius: 0.55, kind: 'solid' });
     const companionDoorGlow = new THREE.PointLight(0x8cffb8, 1.25, 20, 2);
-    companionDoorGlow.position.set(COMPANION_HOUSE.x, 1.2, COMPANION_HOUSE.z - 2.2);
+    companionDoorGlow.position.set(COMPANION_HOUSE.x, 0.22, COMPANION_HOUSE.z - 0.36);
     scene.add(companionDoorGlow);
     const companionHouseFigure = makeNpcFigure(COMPANION_HOUSE.mood);
-    companionHouseFigure.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z - 2.65);
+    companionHouseFigure.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z - 0.9);
     scene.add(companionHouseFigure);
     npcFigures.push({ npc: COMPANION_HOUSE, mesh: companionHouseFigure });
 
