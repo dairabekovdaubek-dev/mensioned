@@ -237,8 +237,8 @@ const USE_CHARACTER_RUNTIME_ASSETS = true;
 const USE_WORLD_TEXTURE_ASSETS = true;
 const USE_WORLD_RUNTIME_ASSETS = true;
 const USE_MEDIEVAL_FBX_HOUSES = false;
-const MEDIEVAL_PROP_SCALE = 0.28;
-const HOUSE_WORLD_SCALE = 0.11;
+const MEDIEVAL_PROP_SCALE = 0.025;
+const HOUSE_WORLD_SCALE = 0.01;
 const COMPANION_HOUSE: HouseNpc = {
   id: 99,
   name: 'Саят',
@@ -2402,6 +2402,18 @@ function makeWorldChunk(cx: number, cz: number) {
     group.add(car);
   }
 
+  if (!riverBand && hash2(cx, cz, 1560) > 0.58) {
+    const houseCount = 1 + Math.floor(hash2(cx, cz, 1561) * 3);
+    for (let i = 0; i < houseCount; i++) {
+      const tinyHouse = makeHouse(hash2(cx, cz, i + 1562) > 0.78 ? 'evil' : 'neutral');
+      tinyHouse.position.set(chunkRandom(cx, cz, i + 1565, -34, 34), 0, chunkRandom(cx, cz, i + 1585, -34, 34));
+      tinyHouse.rotation.y = chunkRandom(cx, cz, i + 1605, -0.55, 0.55);
+      tinyHouse.scale.setScalar(HOUSE_WORLD_SCALE);
+      obstacles.push({ x: tinyHouse.position.x, z: tinyHouse.position.z, radius: 0.55, kind: 'solid' });
+      group.add(tinyHouse);
+    }
+  }
+
   if (hash2(cx, cz, 1320) > 0.82) {
     const cache = makeMedicalSupplyCache();
     cache.position.set(chunkRandom(cx, cz, 1321, -34, 34), 0, chunkRandom(cx, cz, 1322, -34, 34));
@@ -3264,13 +3276,13 @@ export function QasqyrGame({
       house.scale.setScalar(HOUSE_WORLD_SCALE);
       scene.add(house);
       placedHouses.push({ npc, mesh: house, replaced: false });
-      addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 0.85, kind: 'solid' });
+      addObstacle({ key: `house-${npc.id}`, x: npc.x, z: npc.z, radius: 0.32, kind: 'solid' });
       const windowGlow = new THREE.PointLight(npc.mood === 'evil' ? 0xb84230 : 0xffc978, npc.mood === 'evil' ? 1.15 : 0.9, 18, 2.1);
-      windowGlow.position.set(npc.x, 0.35, npc.z - 0.45);
+      windowGlow.position.set(npc.x, 0.08, npc.z - 0.08);
       scene.add(windowGlow);
 
       const figure = makeNpcFigure(npc.mood);
-      figure.position.set(npc.x, 0, npc.z - 1.25);
+      figure.position.set(npc.x, 0, npc.z - 0.8);
       scene.add(figure);
       npcFigures.push({ npc, mesh: figure });
     }
@@ -3280,12 +3292,12 @@ export function QasqyrGame({
     companionHouse.scale.setScalar(HOUSE_WORLD_SCALE);
     scene.add(companionHouse);
     placedHouses.push({ npc: COMPANION_HOUSE, mesh: companionHouse, replaced: false });
-    addObstacle({ key: 'companion-house', x: COMPANION_HOUSE.x, z: COMPANION_HOUSE.z, radius: 0.85, kind: 'solid' });
+    addObstacle({ key: 'companion-house', x: COMPANION_HOUSE.x, z: COMPANION_HOUSE.z, radius: 0.32, kind: 'solid' });
     const companionDoorGlow = new THREE.PointLight(0x8cffb8, 1.25, 20, 2);
-    companionDoorGlow.position.set(COMPANION_HOUSE.x, 0.35, COMPANION_HOUSE.z - 0.45);
+    companionDoorGlow.position.set(COMPANION_HOUSE.x, 0.08, COMPANION_HOUSE.z - 0.08);
     scene.add(companionDoorGlow);
     const companionHouseFigure = makeNpcFigure(COMPANION_HOUSE.mood);
-    companionHouseFigure.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z - 1.25);
+    companionHouseFigure.position.set(COMPANION_HOUSE.x, 0, COMPANION_HOUSE.z - 0.8);
     scene.add(companionHouseFigure);
     npcFigures.push({ npc: COMPANION_HOUSE, mesh: companionHouseFigure });
 
@@ -4756,9 +4768,9 @@ export function QasqyrGame({
       const followRight = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw));
       const speedSway = Math.min(1, currentSpeed / PLAYER_SPEED);
       const camBob = Math.sin(playerWalkTime * 0.65) * 0.18 * speedSway;
-      const shoulder = inHloddev ? 1.65 : 1.35;
-      const cameraDistance = inHloddev ? 10.5 : activeEvent === 'storm' ? 11.5 : 12.5;
-      const cameraHeight = inHloddev ? 6.9 : activeEvent === 'storm' ? 6.4 : 7.1;
+      const shoulder = inHloddev ? 1.25 : 1.05;
+      const cameraDistance = inHloddev ? 11.0 : activeEvent === 'storm' ? 11.8 : 12.6;
+      const cameraHeight = inHloddev ? 6.2 : activeEvent === 'storm' ? 5.8 : 6.4;
       const desiredCamera = cameraTarget
         .clone()
         .addScaledVector(followForward, -cameraDistance - speedSway * 1.35)
@@ -4768,8 +4780,8 @@ export function QasqyrGame({
         desiredCamera,
         clamp(dt * 5.2, 0.04, 0.16),
       );
-      const lookAhead = cameraTarget.clone().addScaledVector(followForward, 9.5 + speedSway * 3.1);
-      camera.lookAt(lookAhead.x, lookAhead.y + 1.9 + cameraPitch * 4.6, lookAhead.z);
+      const lookAhead = cameraTarget.clone().addScaledVector(followForward, 1.35 + speedSway * 0.75);
+      camera.lookAt(lookAhead.x, lookAhead.y + 1.2 + cameraPitch * 2.7, lookAhead.z);
 
       const distance = Math.max(0, Math.round(((playerRef.current.z - FINISH_Z) / (START_Z - FINISH_Z)) * 100));
       setHud({
