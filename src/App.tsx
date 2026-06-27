@@ -4,6 +4,7 @@ import { supabase } from './lib/supabase';
 import { Auth } from './components/Auth';
 import { Reviews } from './components/Reviews';
 import { PresentationPage } from './components/Presentation';
+import { Flappy3DGame } from './game/Flappy3DGame';
 import { QasqyrGame } from './game/QasqyrGame';
 import { useGameAssetPreload } from './lib/assetPreload';
 
@@ -32,6 +33,10 @@ export default function App() {
     return <PresentationPage />;
   }
 
+  if (path === '/flappy3d') {
+    return <Flappy3DGame />;
+  }
+
   if (path === '/mobile') {
     return (
       <QasqyrGame
@@ -58,6 +63,9 @@ export default function App() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="ghost" onClick={() => setPlaying((p) => (p ? false : preload.done))} disabled={!playing && !preload.done}>
             {playing ? 'Назад' : 'Играть'}
+          </button>
+          <button className="ghost" onClick={() => window.location.assign('/flappy3d')}>
+            Flappy 3D
           </button>
           {session && (
             <button className="ghost" onClick={() => supabase.auth.signOut()}>
